@@ -93,10 +93,10 @@ def test_every_kind_of_action_is_traced(audited):
     assert [x["statut"] for x in events(action="DEMANDE_CORRECTION_APPROUVEE")] == ["SUCCES", "ECHEC"]
 
     # --- public : demande de création ; admin : refus ---
-    new = {"matricule": "ZZTJOURNAL01", "nom": "Zztest", "prenoms": "Eve", "date_naissance": "2001-02-03"}
+    new = {"matricule": "ZZTE0302010001", "nom": "Zztest", "prenoms": "Eve", "date_naissance": "2001-02-03"}
     assert client.post("/api/demander_creation", json=new).status_code == 201
     e = only("DEMANDE_CREATION_SOUMISE")
-    assert e["details"]["matricule_calcule"] == "ZZTE0302010001" and e["cible"] == "ZZTJOURNAL01"
+    assert e["details"]["champs"] == ["date_naissance", "nom", "prenoms"] and e["cible"] == "ZZTE0302010001"
     creation_id = client.get("/api/admin_creations").json()["data"][0]["id"]
     assert client.post("/api/admin_creations", json={"id": creation_id, "action": "reject"}).status_code == 200
     assert only("DEMANDE_CREATION_REFUSEE")["cible"] == str(creation_id)

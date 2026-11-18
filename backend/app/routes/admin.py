@@ -19,10 +19,10 @@ from ..student_helpers import (
     fix_encoding,
     lookup_reference_id,
     parse_student_date,
-    student_matricule,
     valid_email,
 )
 from .. import docs as d
+from ..student_rules import index_add, index_find, load_name_index, validate_matricule, validate_name
 from .common import json_body, json_object, positive_int
 
 logger = logging.getLogger(__name__)
@@ -266,28 +266,14 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
                 if not student:
                     raise ApiError(422, "Étudiant associé à la demande introuvable.")
 
+                # Le matricule est un identifiant fourni : il n'est jamais recalculé ni modifié ici.
                 matricule = student["matricule"]
-                if {"nom", "prenoms", "date_naissance"} & changes.keys():
-                    nom = str(changes.get("nom") or student["nom"])
-                    prenoms = str(changes.get("prenoms") or student["prenoms"])
-                    birth_date = str(changes.get("date_naissance") or student["date_naissance"] or "")
-                    if not birth_date:
-                        raise ApiError(
-                            422, "Une date de naissance est requise pour recalculer le matricule."
-                        )
-                    try:
-                        matricule = student_matricule(nom, prenoms, birth_date)
-                    except ValueError as error:
-                        raise ApiError(422, str(error))
-                    cursor.execute(
-                        "SELECT id FROM etudiant WHERE matricule = %s AND id <> %s",
-                        (matricule, modification["etudiant_id"]),
-                    )
-                    if cursor.fetchone():
-                        raise ApiError(
-                            422, "Le matricule calculé existe déjà pour un autre étudiant."
-                        )
-                    changes["matricule"] = matricule
+                for field, label in (("nom", "Nom"), ("prenoms", "Prénoms")):
+                    if field in changes:
+                        try:
+                            changes[field] = validate_name(changes[field], label)
+                        except ValueError as error:
+                            raise ApiError(422, str(error))
 
                 for field, column in (("filiere", "filiere_id"), ("niveau", "niveau_id")):
                     if field in changes:
@@ -362,11 +348,14 @@ CSV_ALIASES = {
     "date_de_naissance": "date_naissance",
     "date_naiss": "date_naissance",
     "e_mail": "email",
+    "numero_matricule": "matricule",
+    "n_matricule": "matricule",
+    "no_matricule": "matricule",
     "allergies": "allergies_affection",
     "allergie_affection": "allergies_affection",
     "allergies_affections": "allergies_affection",
 }
-CSV_REQUIRED = {"nom", "prenoms", "date_naissance", "filiere", "niveau"}
+CSV_REQUIRED = {"nom", "prenoms"}
 
 
 def _normalize_header(value: str) -> str:
@@ -381,9 +370,16 @@ def _normalize_header(value: str) -> str:
     tags=["Administration"],
     summary="Importer des étudiants depuis un CSV",
     description="Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, "
-    "séparateur `,` ou `;`). Colonnes obligatoires : `nom`, `prenoms`, `date_naissance`, "
-    "`filiere`, `niveau` ; facultatives : `telephone`, `email`, `sexe`, "
-    "`allergies_affection`. Tout ou rien : une erreur annule l'import.",
+    "séparateur `,` ou `;`). **Seules les colonnes `nom` et `prenoms` sont obligatoires.** Facultatives : "
+    "`matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, "
+    "`allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel "
+    "(format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; "
+    "sinon l'étudiant est créé sans matricule, à renseigner ensuite. Sans matricule, un homonyme exact déjà "
+    "présent (même date de naissance, ou date inconnue) est refusé comme doublon. "
+    "Les noms et prénoms n'acceptent que les lettres de l'alphabet français, "
+    "espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). "
+    "Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). "
+    "Tout ou rien : une erreur annule l'import.",
     response_model=None,
     responses={
         201: {"model": d.ImportResponse, "description": "Étudiants importés."},
@@ -423,21 +419,23 @@ def import_students(
     headers = [_normalize_header(value) for value in headers]
     headers = [CSV_ALIASES.get(header, header) for header in headers]
     if not CSV_REQUIRED.issubset(headers):
-        raise ApiError(
-            422, "Colonnes obligatoires : nom, prenoms, date_naissance, filiere, niveau."
-        )
+        raise ApiError(422, "Colonnes obligatoires : nom, prenoms.")
 
     errors: list[str] = []
     seen_matricules: list[str] = []  # ordre d'insertion
     seen_set: set[str] = set()
     reference_cache: dict[str, dict[str, int | None]] = {"filiere": {}, "niveau": {}}
     imported = 0
+    without_matricule = 0
+    name_index = None  # chargé seulement si une ligne n'a pas de matricule
     try:
         with db.transaction():
             with db.cursor() as cursor:
                 for row_number, values in enumerate(reader, start=2):
                     if not any(value.strip() for value in values):
                         continue
+                    if values and values[0].lstrip().startswith("#"):
+                        continue  # ligne d'aide du modèle d'import
                     if row_number > config.CSV_MAX_ROW_NUMBER:
                         errors.append("Le fichier dépasse la limite de 5 000 lignes.")
                         break
@@ -445,9 +443,11 @@ def import_students(
                         key: (values[index].strip() if index < len(values) else "")
                         for index, key in enumerate(headers)
                     }
+                    raw_matricule = row.get("matricule", "")
                     nom = row.get("nom", "")
                     prenoms = row.get("prenoms", "")
-                    birth_date = parse_student_date(row.get("date_naissance", ""))
+                    raw_birth = row.get("date_naissance", "")
+                    birth_date = parse_student_date(raw_birth) if raw_birth else None
                     filiere = row.get("filiere", "")
                     niveau = row.get("niveau", "")
                     email = row.get("email", "")
@@ -455,10 +455,20 @@ def import_students(
                     telephone = row.get("telephone", "")
                     allergies = row.get("allergies_affection", "")
 
-                    if not nom or not prenoms or not birth_date or not filiere or not niveau:
+                    if not nom or not prenoms:
+                        errors.append(f"Ligne {row_number} : le nom et les prénoms sont obligatoires.")
+                        continue
+                    try:
+                        matricule = validate_matricule(raw_matricule) if raw_matricule else None
+                        nom = validate_name(nom, "Nom")
+                        prenoms = validate_name(prenoms, "Prénoms")
+                    except ValueError as error:
+                        errors.append(f"Ligne {row_number} : {error}")
+                        continue
+                    if raw_birth and not birth_date:
                         errors.append(
-                            f"Ligne {row_number} : nom, prénoms, date de naissance, "
-                            "filière et niveau sont obligatoires."
+                            f"Ligne {row_number} : date de naissance invalide "
+                            "(AAAA-MM-JJ ou JJ/MM/AAAA, pas de date future)."
                         )
                         continue
                     if not valid_email(email):
@@ -467,22 +477,32 @@ def import_students(
                     if sexe and sexe not in ("M", "F"):
                         errors.append(f"Ligne {row_number} : le sexe doit être M ou F.")
                         continue
-                    try:
-                        matricule = student_matricule(nom, prenoms, birth_date)
-                    except ValueError as error:
-                        errors.append(f"Ligne {row_number} : {error}")
-                        continue
-
-                    cursor.execute("SELECT id FROM etudiant WHERE matricule = %s", (matricule,))
-                    if cursor.fetchone() or matricule in seen_set:
-                        errors.append(
-                            f"Ligne {row_number} : matricule déjà présent ou dupliqué "
-                            f"dans le CSV ({matricule})."
-                        )
-                        continue
+                    if matricule:
+                        cursor.execute("SELECT id FROM etudiant WHERE matricule = %s", (matricule,))
+                        if cursor.fetchone() or matricule in seen_set:
+                            errors.append(
+                                f"Ligne {row_number} : matricule déjà présent ou dupliqué "
+                                f"dans le CSV ({matricule})."
+                            )
+                            continue
+                    else:
+                        if name_index is None:
+                            name_index = load_name_index(cursor)
+                        homonym = index_find(name_index, nom, prenoms, birth_date)
+                        if homonym is not False:
+                            errors.append(
+                                f"Ligne {row_number} : doublon, {nom} {prenoms} existe déjà "
+                                f"({'matricule ' + homonym if homonym else 'sans matricule'}). "
+                                "Renseignez un matricule ou une date de naissance différente "
+                                "s'il s'agit d'un homonyme."
+                            )
+                            continue
 
                     reference_ids = {}
                     for table, label in (("filiere", filiere), ("niveau", niveau)):
+                        if not label.strip():
+                            reference_ids[table] = None
+                            continue
                         key = label.strip().lower()
                         if key not in reference_cache[table]:
                             reference_cache[table][key] = lookup_reference_id(
@@ -509,8 +529,13 @@ def import_students(
                             reference_ids["niveau"],
                         ),
                     )
-                    seen_matricules.append(matricule)
-                    seen_set.add(matricule)
+                    if matricule:
+                        seen_matricules.append(matricule)
+                        seen_set.add(matricule)
+                    else:
+                        without_matricule += 1
+                    if name_index is not None:
+                        index_add(name_index, nom, prenoms, birth_date, matricule)
                     imported += 1
 
                 # Lever une exception ici annule toute la transaction (aucune ligne importée).
@@ -528,13 +553,15 @@ def import_students(
             500, "Erreur lors de l'import. Vérifiez le format CSV et le schéma de la base."
         )
 
-    audit.annotate(importes=imported)
+    audit.annotate(importes=imported, sans_matricule=without_matricule)
     return respond(
         201,
         {
             "status": "success",
-            "message": f"{imported} étudiant(s) importé(s) avec succès.",
+            "message": f"{imported} étudiant(s) importé(s) avec succès."
+            + (f" {without_matricule} sans matricule : à renseigner ensuite." if without_matricule else ""),
             "imported": imported,
+            "sans_matricule": without_matricule,
             "matricules": seen_matricules,
         },
     )
@@ -572,7 +599,7 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
             with db.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT id, donnees FROM etudiant_creation_demande
+                    SELECT id, matricule_saisi, donnees FROM etudiant_creation_demande
                     WHERE id = %s AND statut = 'EN_ATTENTE'
                     FOR UPDATE
                     """,
@@ -597,20 +624,20 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
                 if (
                     not isinstance(fields, dict)
                     or not (MODIFICATION_FIELDS >= set(fields))
-                    or not all(fields.get(k) for k in ("nom", "prenoms", "date_naissance"))
+                    or not all(fields.get(k) for k in ("nom", "prenoms"))
                 ):
                     raise ApiError(422, "Contenu de demande invalide.")
+                birth = fields.get("date_naissance") or None
                 try:
-                    matricule = student_matricule(
-                        fields["nom"], fields["prenoms"], fields["date_naissance"]
-                    )
+                    # Le matricule est celui saisi par le candidat (jamais calculé), re-contrôlé ici.
+                    matricule = validate_matricule(demande["matricule_saisi"])
+                    nom = validate_name(fields["nom"], "Nom")
+                    prenoms = validate_name(fields["prenoms"], "Prénoms")
                 except ValueError as error:
                     raise ApiError(422, str(error))
                 cursor.execute("SELECT id FROM etudiant WHERE matricule = %s", (matricule,))
                 if cursor.fetchone():
-                    raise ApiError(
-                        422, "Le matricule calculé existe déjà pour un autre étudiant."
-                    )
+                    raise ApiError(422, "Ce matricule existe déjà pour un autre étudiant.")
 
                 cursor.execute(
                     """
@@ -622,9 +649,9 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
                     """,
                     (
                         matricule,
-                        fields["nom"],
-                        fields["prenoms"],
-                        fields["date_naissance"],
+                        nom,
+                        prenoms,
+                        birth,
                         fields.get("telephone") or None,
                         fields.get("email") or None,
                         fields.get("sexe") or None,
@@ -656,8 +683,8 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
     "/api/admin_creations",
     tags=["Administration"],
     summary="Approuver ou refuser une demande d'ajout de dossier",
-    description="`approve` crée l'étudiant avec le matricule calculé (nom, prénom, date de "
-    "naissance) ; `reject` refuse la demande.",
+    description="`approve` crée l'étudiant avec le matricule saisi par le candidat (contrôlé : format "
+    "et unicité) ; `reject` refuse la demande.",
     response_model=None,
     responses={
         200: {"model": d.CreationDecisionResponse},

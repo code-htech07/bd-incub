@@ -90,8 +90,11 @@ class UpdateStudentBody(BaseModel):
     email: str | None = None
     sexe: str | None = Field(default=None, description="`M` ou `F`.")
     allergies_affection: str | None = Field(default=None, max_length=2000)
-    date_naissance: str | None = Field(
-        default=None, description="Recalcule le matricule ; `409` si le nouveau existe déjà."
+    date_naissance: str | None = Field(default=None, description="`AAAA-MM-JJ` ou `JJ/MM/AAAA`. Ne modifie jamais le matricule.")
+    matricule: str | None = Field(
+        default=None,
+        description="Attribue un matricule à un étudiant qui n'en a pas (format `KOUA1703980001`, unique : `409` "
+        "sinon). Un matricule déjà attribué ne peut pas être modifié (`422`).",
     )
 
 
@@ -198,7 +201,8 @@ class ModificationDecisionResponse(SuccessResponse):
 
 class ImportResponse(SuccessResponse):
     imported: int
-    matricules: list[str]
+    sans_matricule: int = Field(description="Étudiants créés sans matricule (à renseigner ensuite).")
+    matricules: list[str] = Field(description="Matricules importés (les étudiants sans matricule n'y figurent pas).")
 
 
 class AttendanceRow(BaseModel):
@@ -251,7 +255,7 @@ class CreationBody(BaseModel):
     matricule: str = Field(description="Matricule saisi par le candidat.", examples=[MATRICULE_EXAMPLE])
     nom: str = Field(max_length=150, examples=["Kouadio"])
     prenoms: str = Field(max_length=150, examples=["Alain"])
-    date_naissance: str = Field(description="`AAAA-MM-JJ`, `JJ/MM/AAAA` ou `JJ-MM-AAAA`.", examples=["1998-03-17"])
+    date_naissance: str | None = Field(default=None, description="Facultative : `AAAA-MM-JJ`, `JJ/MM/AAAA` ou `JJ-MM-AAAA`.", examples=["1998-03-17"])
     filiere: str | None = Field(default=None, max_length=150)
     niveau: str | None = Field(default=None, max_length=150)
     telephone: str | None = Field(default=None, max_length=40)

@@ -134,10 +134,10 @@ def test_import_requires_csv_file(client):
     )
     assert response.status_code == 422
     response = client.post(
-        "/api/import_etudiants", headers=auth(), files={"fichier": ("x.csv", b"nom;prenoms\nA;B")}
+        "/api/import_etudiants", headers=auth(), files={"fichier": ("x.csv", b"nom;date_naissance\nA;1990-01-01")}
     )
     assert response.status_code == 422
-    assert response.json()["message"].startswith("Colonnes obligatoires")
+    assert response.json()["message"] == "Colonnes obligatoires : nom, prenoms."
 
 
 def test_openapi_documents_every_route(client):
@@ -240,11 +240,13 @@ def test_creation_request_validation(client):
     url = "/api/demander_creation"
     assert client.post(url, json={}).status_code == 400
     assert client.post(url, json={"matricule": "ZZTX0101000001"}).status_code == 422
-    body = {"matricule": "ZZTX0101000001", "nom": "Zztest", "prenoms": "X"}
-    assert client.post(url, json=body).json()["message"] == (
-        "Le nom, les prénoms et la date de naissance sont obligatoires."
-    )
+    body = {"matricule": "ZZTX0101000001", "nom": "Zztest"}
+    assert client.post(url, json=body).json()["message"] == "Le nom et les prénoms sont obligatoires."
+    body = {**body, "prenoms": "Xavier"}
     assert client.post(url, json={**body, "date_naissance": "2999-01-01"}).status_code == 422
+    for field, bad in (("nom", "阿里"), ("prenoms", "Мария"), ("nom", "Zzt3st"), ("prenoms", "Jo@n")):
+        response = client.post(url, json={**body, field: bad})
+        assert response.status_code == 422 and "alphabet français" in response.json()["message"], (field, bad)
     assert client.post(url, json={**body, "date_naissance": "1999-01-01", "email": "x"}).status_code == 422
 
 

@@ -545,6 +545,11 @@
             .dialog-head,.dialog-body,.dialog-foot{padding-left:18px;padding-right:18px}
             .dialog-foot .admin-action{flex:1}
         }
+
+        /* Matricule à renseigner (étudiant importé sans matricule) */
+        .mat-input{width:150px;padding:7px 9px;border:1.5px dashed #e0a43a;border-radius:9px;background:#fff8e8;color:var(--bp);
+            font:600 .8rem ui-monospace,Consolas,monospace;text-transform:uppercase;letter-spacing:.03em}
+        .mat-input:focus{outline:none;border:1.5px solid var(--royal);background:#fff;box-shadow:0 0 0 4px rgba(31,85,216,.14)}
     </style>
 </head>
 
@@ -672,7 +677,7 @@
                 </div>
                 <button class="admin-action" type="button" id="btn-import">Importer les étudiants</button>
                 <button class="admin-action" type="button" id="btn-template">Télécharger le modèle CSV</button>
-                <p class="hint">Colonnes requises : nom, prenoms, date_naissance (AAAA-MM-JJ ou JJ/MM/AAAA), filiere, niveau. Colonnes facultatives : telephone, email, sexe (M/F), allergies_affection. Le matricule est généré automatiquement.</p>
+                <p class="hint"><b>Seules les colonnes nom et prenoms sont obligatoires.</b> Colonnes facultatives : matricule, date_naissance (AAAA-MM-JJ ou JJ/MM/AAAA), filiere, niveau, telephone, email, sexe (M/F), allergies_affection. Le matricule n’est jamais généré : s’il est fourni, il est importé tel quel et doit respecter le format (3 ou 4 lettres majuscules, 6 chiffres jjmmaa, 4 chiffres, ex. KOUA1703980001) et être unique ; sinon l’étudiant est créé sans matricule, à renseigner ensuite dans la liste. Les noms et prénoms n’acceptent que l’alphabet français (lettres accentuées, espaces, tirets, apostrophes) : ni chiffres, ni symboles, ni écritures non latines. Sans matricule, un homonyme déjà présent est refusé comme doublon. Les lignes commençant par # sont ignorées.</p>
             </div>
             <div class="import-result" id="import-result" aria-live="polite"></div>
         </section>
@@ -702,7 +707,7 @@
 
             <div class="request-group">
                 <h3 class="group-title">Ajouts de dossier <span class="count-chip" id="count-creas">0</span></h3>
-                <p class="group-sub">Candidats dont le matricule est inconnu : le dossier n’est créé qu’après approbation, avec le matricule calculé (nom, prénom, date de naissance).</p>
+                <p class="group-sub">Candidats dont le matricule est inconnu : le dossier n’est créé qu’après approbation, avec le matricule saisi par le candidat (format et unicité contrôlés).</p>
                 <div class="request-list" id="creations-list"><p>Chargement des demandes…</p></div>
             </div>
         </section>
@@ -1323,7 +1328,7 @@
             const q = normaliserRecherche($('search').value);
             const termes = q.split(/\s+/).filter(Boolean);
             const liste = etudiants.filter(e => {
-                const searchable = normaliserRecherche(`${e.matricule} ${e.nom} ${e.prenoms} ${e.filiere} ${e.niveau} ${e.email || ''}`);
+                const searchable = normaliserRecherche(`${e.matricule || ''} ${e.nom} ${e.prenoms} ${e.filiere} ${e.niveau} ${e.email || ''}`);
                 return termes.every(t => searchable.includes(t));
             });
 
@@ -1344,7 +1349,7 @@
                     : `<span class="tag no">Non inscrit</span>`;
                 return `
                 <tr class="${animate ? 'in' : ''}" style="--i:${Math.min(n, 14)}">
-                    <td><span class="mat" id="mat-${e.id}">${esc(e.matricule)}</span></td>
+                    <td><span class="mat" id="mat-${e.id}">${e.matricule ? esc(e.matricule) : `<input type="text" class="mat-input" id="matin-${e.id}" maxlength="14" placeholder="À renseigner" title="Matricule à attribuer (ex. KOUA1703980001) puis Enregistrer" autocomplete="off" spellcheck="false">`}</span></td>
                     <td>
                         <div class="who">
                             <span class="avatar-sm" aria-hidden="true">${esc(initiales(e))}</span>
@@ -1627,6 +1632,8 @@
             const avantTel = e ? (e.telephone || '').trim() : '';
             const avantMail = e ? (e.email || '').trim() : '';
             const avantMatricule = e ? e.matricule : '';
+            const champMatricule = $('matin-' + id);
+            const nouveauMatricule = champMatricule ? champMatricule.value.trim().toUpperCase() : '';
 
             if (adresse && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adresse)) {
                 toast('Adresse e-mail invalide', 'error');
@@ -1640,6 +1647,7 @@
 
             const update = { id: id, telephone: valeur, email: adresse, sexe: genre };
             if (naissance) update.date_naissance = naissance;
+            if (nouveauMatricule) update.matricule = nouveauMatricule;
 
             try {
                 const res = await adminFetch('/api/update_etudiant', {
@@ -1666,7 +1674,7 @@
                     if (mail) mail.style.borderColor = 'var(--ok)';
                     if (dateNaissance && naissance) dateNaissance.style.borderColor = 'var(--ok)';
                     const mat = $('mat-' + id);
-                    if (mat && e) mat.textContent = e.matricule;
+                    if (mat && e && e.matricule) mat.textContent = e.matricule;
                     setTimeout(() => {
                         btn.classList.remove('ok');
                         btn.textContent = 'Enregistrer';
@@ -1676,8 +1684,8 @@
                         if (dateNaissance) dateNaissance.style.borderColor = '';
                     }, 1800);
                     majKpis();
-                    const changementMatricule = e && e.matricule !== avantMatricule
-                        ? ` Nouveau matricule : ${e.matricule}`
+                    const changementMatricule = e && e.matricule && e.matricule !== avantMatricule
+                        ? ` Matricule attribué : ${e.matricule}`
                         : '';
                     toast((data.message || 'Fiche mise à jour') + changementMatricule, 'success');
                     mood('celebrate');
@@ -1741,7 +1749,7 @@
                 const rows = await fetchTousEtudiants();
                 if (!rows.length) { toast('Aucune donnée à exporter', 'warn'); return; }
                 const data = [['Matricule', 'Nom', 'Prénoms', 'Date de naissance', 'Filière', 'Niveau', 'Numéro candidat', 'Sexe', 'E-mail', 'Téléphone']];
-                rows.forEach(e => data.push([e.matricule, e.nom, e.prenoms, e.date_naissance || '', e.filiere || '', e.niveau || '', e.numero_candidat || '',
+                rows.forEach(e => data.push([e.matricule || '', e.nom, e.prenoms, e.date_naissance || '', e.filiere || '', e.niveau || '', e.numero_candidat || '',
                     e.sexe === 'M' ? 'Masculin' : e.sexe === 'F' ? 'Féminin' : '', e.email || '', e.telephone || '']));
                 csvDownload(data, 'UPB_Etudiants_' + isoDay(new Date()) + '.csv');
                 toast(`Export Excel prêt : ${fmtNum(rows.length)} étudiant(s)`, 'success');
@@ -2462,14 +2470,13 @@
             location.reload();
         });
 
+        // Le modèle est un fichier statique (frontend/modele_import_etudiants.csv), identique pour tous
+        // et vérifié par les tests avec le vrai importeur.
         $('btn-template').addEventListener('click', () => {
-            const csv = 'nom;prenoms;date_naissance;telephone;email;sexe;filiere;niveau;allergies_affection\r\n';
-            const url = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
             const link = document.createElement('a');
-            link.href = url;
+            link.href = 'modele_import_etudiants.csv';
             link.download = 'modele_import_etudiants.csv';
             link.click();
-            URL.revokeObjectURL(url);
         });
 
         $('btn-import').addEventListener('click', async () => {

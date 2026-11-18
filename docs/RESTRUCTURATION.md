@@ -376,3 +376,56 @@ Trois adaptations du code, nécessaires parce que pages et API sont désormais s
 - Vérifié : dépendances installées et 42 tests hors base réussis sous **Python 3.12.10** (version conseillée
   pour Render) ; démarrage avec la commande Render (`uvicorn app.main:app --host 0.0.0.0 --port $PORT`),
   GET et HEAD sur `/api/sante`, CORS (origine autorisée / refusée) et lecture de l'IP via `X-Forwarded-For`.
+
+## Étape 15 — Import : nom et prénoms seuls obligatoires, alphabet français uniquement
+
+- **Colonnes** : seules `nom` et `prenoms` sont obligatoires (`CSV_REQUIRED`) ; `date_naissance`,
+  `filiere`, `niveau` et les autres sont facultatives. La date, si elle est fournie mais invalide, reste une
+  erreur (elle n'est pas ignorée en silence). Même règle pour les candidats (`/api/demander_creation` :
+  date facultative ; `/api/demander_modification` : une date vide est « non renseignée »).
+- **Noms étrangers** : interprété comme *alphabet*, pas comme origine. `app/student_rules.validate_name`
+  n'accepte que A-Z, les lettres accentuées du français, espaces, tirets et apostrophes (au moins
+  2 lettres, début et fin par une lettre). Les écritures non latines, chiffres, symboles et emojis sont
+  refusés, avec la liste des caractères refusés dans le message. Appliqué à l'import CSV, aux demandes
+  de création et de correction, et re-contrôlé à l'approbation. Les données déjà en base ne sont pas
+  modifiées. Aucun filtre sur l'origine ou la nationalité d'un nom (injuste et impossible à faire de façon fiable).
+- **Matricule sans date** : le matricule dépend de la date de naissance ; sans elle il devient
+  `NOM(3 lettres) + initiale + 000000 + numéro` (premier numéro libre de 0001 à 9999) ; il est recalculé
+  avec la date quand elle est ajoutée ; le matricule sans date déjà valable est conservé si le nom change
+  sans changer de préfixe.
+- **Doublons** : sans date, impossible de distinguer deux personnes ; même nom et prénoms (accents, casse et
+  espaces ignorés) avec dates identiques, ou date absente d'un côté, = doublon refusé (à l'import, à la
+  demande de création et à l'approbation). Les homonymes ne passent que s'ils ont des dates connues différentes.
+- **Modèle d'import** : fichier statique `frontend/modele_import_etudiants.csv` (UTF-8 avec BOM, fins de ligne
+  Windows pour Excel, séparateur `;`, colonnes obligatoires en premier). Les lignes commençant par `#` sont
+  ignorées par l'importeur : le modèle contient des lignes d'aide et des exemples commentés qu'on ne peut donc
+  pas importer par accident. Remplace le modèle généré par la page. Test de bout en bout avec le vrai importeur.
+- `admin.html` et `index.html` : textes d'aide mis à jour ; contrôle des noms côté page (le serveur reste
+  l'autorité) ; nom et prénoms marqués obligatoires, date « facultative ».
+
+## Étape 16 — Le matricule est fourni, jamais calculé ; modèle d'import avec matricule
+
+Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (étudiant) ou importé (fichier).
+
+- **Import** (`/api/import_etudiants`) : colonne `matricule` prise en charge (alias `numero_matricule`, `n_matricule`,
+  `no_matricule`) ; **seules `nom` et `prenoms` restent obligatoires**, tout le reste est facultatif, matricule
+  compris. Matricule fourni : contrôlé (format `validate_matricule` : 3-4 lettres + `jjmmaa` possible + 4 chiffres ;
+  unicité en base et dans le fichier) puis importé tel quel, mis en majuscules. Matricule absent : étudiant créé
+  **sans matricule** (compté dans `sans_matricule`). Les lignes sans matricule sont contrôlées contre les doublons
+  par nom (même nom et prénoms, date identique ou inconnue d'un côté) ; les lignes avec matricule ne le sont que
+  sur l'unicité du matricule (les homonymes sont permis).
+- **Matricule jamais recalculé** : supprimés le matricule « sans date » (`000000`), le recalcul à l'approbation
+  d'une correction et le recalcul quand la date change (`update_etudiant`). Une correction de nom, prénoms ou
+  date ne modifie pas le matricule.
+- **Candidats** : `/api/demander_creation` exige un matricule valide (format) ; l'approbation crée le dossier avec
+  **le matricule saisi** (re-contrôlé, `422` s'il existe déjà), plus le matricule « calculé ».
+- **Étudiant sans matricule** : `migrations/09_matricule_facultatif.sql` (colonne `etudiant.matricule` nullable, la
+  contrainte UNIQUE est conservée). L'administrateur l'attribue ensuite dans la liste (champ « À renseigner ») :
+  `POST /api/update_etudiant` accepte `matricule` (format, unicité `409`) pour un étudiant qui n'en a pas ; un
+  matricule déjà attribué n'est pas modifiable (`422`). Sans matricule, l'étudiant est introuvable par le portail
+  et les intégrations.
+- **Modèle** `frontend/modele_import_etudiants.csv` : colonne `matricule` ajoutée, exemples avec et sans matricule.
+- **Tests** : `tests/test_import_rules.py` réécrit : chaque colonne facultative absente / vide / renseignée,
+  tout vide sauf nom et prénoms, colonnes `nom` et `prenoms` obligatoires, formats de matricule valides et
+  invalides, doublons, attribution ultérieure, modèle de bout en bout, saisies des candidats, corrections qui ne
+  changent jamais le matricule. Autres tests adaptés au matricule fourni.

@@ -415,7 +415,7 @@
           "Portail étudiant"
         ],
         "summary": "Soumettre son dossier quand le matricule est inconnu",
-        "description": "Un candidat dont le matricule n'est pas en base renseigne ses informations. La demande est enregistrée **en attente** : le dossier n'est créé qu'après validation par un administrateur, avec le matricule calculé à partir du nom, du prénom et de la date de naissance. Nom, prénoms et date de naissance sont obligatoires.",
+        "description": "Un candidat dont le matricule n'est pas en base renseigne ses informations. La demande est enregistrée **en attente** : le dossier n'est créé qu'après validation par un administrateur, avec **le matricule saisi par le candidat** (il n'est pas calculé : il doit respecter le format, ex. `KOUA1703980001`, et ne pas exister déjà). **Le matricule, le nom et les prénoms sont obligatoires**, la date de naissance est facultative ; nom et prénoms n'acceptent que les lettres de l'alphabet français, espaces, tirets et apostrophes.",
         "operationId": "request_creation_api_demander_creation_post",
         "requestBody": {
           "description": "Matricule saisi et informations du candidat.",
@@ -448,9 +448,16 @@
                     ]
                   },
                   "date_naissance": {
-                    "type": "string",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
                     "title": "Date Naissance",
-                    "description": "`AAAA-MM-JJ`, `JJ/MM/AAAA` ou `JJ-MM-AAAA`.",
+                    "description": "Facultative : `AAAA-MM-JJ`, `JJ/MM/AAAA` ou `JJ-MM-AAAA`.",
                     "examples": [
                       "1998-03-17"
                     ]
@@ -534,8 +541,7 @@
                 "required": [
                   "matricule",
                   "nom",
-                  "prenoms",
-                  "date_naissance"
+                  "prenoms"
                 ],
                 "title": "CreationBody",
                 "description": "Dossier d'un candidat dont le matricule est inconnu."
@@ -682,7 +688,19 @@
                       }
                     ],
                     "title": "Date Naissance",
-                    "description": "Recalcule le matricule ; `409` si le nouveau existe déjà."
+                    "description": "`AAAA-MM-JJ` ou `JJ/MM/AAAA`. Ne modifie jamais le matricule."
+                  },
+                  "matricule": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Matricule",
+                    "description": "Attribue un matricule à un étudiant qui n'en a pas (format `KOUA1703980001`, unique : `409` sinon). Un matricule déjà attribué ne peut pas être modifié (`422`)."
                   }
                 },
                 "type": "object",
@@ -2114,7 +2132,7 @@
           "Administration"
         ],
         "summary": "Importer des étudiants depuis un CSV",
-        "description": "Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, séparateur `,` ou `;`). Colonnes obligatoires : `nom`, `prenoms`, `date_naissance`, `filiere`, `niveau` ; facultatives : `telephone`, `email`, `sexe`, `allergies_affection`. Tout ou rien : une erreur annule l'import.",
+        "description": "Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, séparateur `,` ou `;`). **Seules les colonnes `nom` et `prenoms` sont obligatoires.** Facultatives : `matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, `allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel (format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; sinon l'étudiant est créé sans matricule, à renseigner ensuite. Sans matricule, un homonyme exact déjà présent (même date de naissance, ou date inconnue) est refusé comme doublon. Les noms et prénoms n'acceptent que les lettres de l'alphabet français, espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). Tout ou rien : une erreur annule l'import.",
         "operationId": "import_students_api_import_etudiants_post",
         "requestBody": {
           "content": {
@@ -2262,7 +2280,7 @@
           "Administration"
         ],
         "summary": "Approuver ou refuser une demande d'ajout de dossier",
-        "description": "`approve` crée l'étudiant avec le matricule calculé (nom, prénom, date de naissance) ; `reject` refuse la demande.",
+        "description": "`approve` crée l'étudiant avec le matricule saisi par le candidat (contrôlé : format et unicité) ; `reject` refuse la demande.",
         "operationId": "process_creation_api_admin_creations_post",
         "requestBody": {
           "description": "Demande et décision.",
@@ -3811,18 +3829,25 @@
             "type": "integer",
             "title": "Imported"
           },
+          "sans_matricule": {
+            "type": "integer",
+            "title": "Sans Matricule",
+            "description": "Étudiants créés sans matricule (à renseigner ensuite)."
+          },
           "matricules": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Matricules"
+            "title": "Matricules",
+            "description": "Matricules importés (les étudiants sans matricule n'y figurent pas)."
           }
         },
         "type": "object",
         "required": [
           "message",
           "imported",
+          "sans_matricule",
           "matricules"
         ],
         "title": "ImportResponse"

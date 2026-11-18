@@ -54,11 +54,11 @@
                     <p class="sub" id="section-sub">Vérifiez votre dossier. Toute correction sera appliquée uniquement après validation par un administrateur.</p>
                     <div class="profile-fields">
                         <div>
-                            <label for="nom">Nom</label>
+                            <label for="nom">Nom <span title="Obligatoire">*</span></label>
                             <input type="text" id="nom" autocomplete="family-name">
                         </div>
                         <div>
-                            <label for="prenoms">Prénoms</label>
+                            <label for="prenoms">Prénoms <span title="Obligatoire">*</span></label>
                             <input type="text" id="prenoms" autocomplete="given-name">
                         </div>
                         <div>
@@ -70,7 +70,7 @@
                             <input type="text" id="niveau">
                         </div>
                         <div>
-                            <label for="date-naissance-correction">Date de naissance</label>
+                            <label for="date-naissance-correction">Date de naissance <small>(facultative)</small></label>
                             <input type="date" id="date-naissance-correction" autocomplete="bday">
                         </div>
                         <div class="contact-field">
@@ -275,10 +275,20 @@
                 allergies_affection: $('allergies-affection').value.trim()
             };
 
-            if (!corrections.nom || !corrections.prenoms || !corrections.date_naissance) {
+            if (!corrections.nom || !corrections.prenoms) {
                 result.classList.remove('hidden');
-                result.innerHTML = '<div class="panel err">Le nom, les prénoms et la date de naissance sont obligatoires.</div>';
+                result.innerHTML = '<div class="panel err">Le nom et les prénoms sont obligatoires.</div>';
                 return;
+            }
+            const L = "A-Za-zÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸŒÆàâäçéèêëîïôöùûüÿœæ";
+            const NOM_VALIDE = new RegExp(`^[${L}][${L}'’ -]*[${L}]$`);
+            for (const [champ, libelle] of [['nom', 'Le nom'], ['prenoms', 'Les prénoms']]) {
+                if (!NOM_VALIDE.test(corrections[champ])) {
+                    result.classList.remove('hidden');
+                    result.innerHTML = `<div class="panel err">${libelle} n’accepte que les lettres de l’alphabet français, les espaces, les tirets et les apostrophes (au moins 2 lettres).</div>`;
+                    secouer($(champ));
+                    return;
+                }
             }
             if (corrections.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(corrections.email)) {
                 secouer($('email'));

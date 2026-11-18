@@ -104,7 +104,7 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 | `POST /api/admin_login` | — | Connexion `{"identifiant", "password"}` → jeton de session (5 échecs = blocage 15 min) |
 | `POST /api/admin_auth_check` | admin | Vérifier la session |
 | `GET /api/get_etudiants` | admin | Liste paginée (`page`, `per_page`, `q`) + statistiques |
-| `POST /api/update_etudiant` | admin | Modifier téléphone, e-mail, sexe, allergies, date de naissance (recalcule le matricule) |
+| `POST /api/update_etudiant` | admin | Modifier téléphone, e-mail, sexe, allergies, date de naissance ; attribuer un matricule à un étudiant qui n'en a pas (jamais recalculé) |
 | `POST /api/update_telephone` | admin | Ancienne route : préférer `update_etudiant` |
 | `GET /api/admin_modifications` | admin | Lister les demandes en attente |
 | `POST /api/admin_modifications` | admin | `{"id": 1, "action": "approve" \| "reject"}` |
@@ -121,14 +121,32 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 
 Règles métier :
 
-- **Parcours candidat** : le candidat saisit son matricule. Trouvé → son dossier s'affiche et il peut proposer des corrections (validées par un admin). Il n'y a **pas d'inscription au concours depuis ce portail** : elle se fait sur le site officiel d'inscription, qui appelle `/api/partenaire/verifier` ; l'étudiant est alors marqué inscrit ici. Non trouvé → message « Matricule non reconnus dans la base I-UPB. » et formulaire de saisie de ses informations (`/api/demander_creation`), le dossier n'étant créé qu'après validation admin, avec le matricule calculé.
-- **Matricule** = 3 premières lettres du nom + 1re lettre du prénom (sans accents,
-  majuscules) + `jjmmaa` de naissance + `0001`. Ex. `KOUA1703980001`.
+- **Parcours candidat** : le candidat saisit son matricule. Trouvé → son dossier s'affiche et il peut proposer des corrections (validées par un admin). Il n'y a **pas d'inscription au concours depuis ce portail** : elle se fait sur le site officiel d'inscription, qui appelle `/api/partenaire/verifier` ; l'étudiant est alors marqué inscrit ici. Non trouvé → message « Matricule non reconnus dans la base I-UPB. » et formulaire de saisie de ses informations (`/api/demander_creation`), le dossier n'étant créé qu'après validation admin, avec le matricule qu'il a saisi (format et unicité contrôlés).
+- **Matricule** : identifiant **fourni, jamais calculé** par le système (l'étudiant le saisit, ou il figure
+  dans le fichier d'import). Format : 3 ou 4 lettres majuscules (nom et initiale du prénom) + 6 chiffres
+  `jjmmaa` (jour et mois possibles) + 4 chiffres, ex. `KOUA1703980001`. Il est unique, ne change jamais
+  quand le nom ou la date de naissance sont corrigés, et ne peut pas être modifié une fois attribué.
+  Un étudiant importé **sans matricule** est créé sans matricule ; un administrateur le renseigne ensuite
+  dans la liste (champ « À renseigner », `POST /api/update_etudiant`). Sans matricule, il reste introuvable
+  par le portail et les intégrations.
+- **Noms et prénoms** : seuls les lettres de l'alphabet français (A-Z et lettres accentuées du
+  français), les espaces, les tirets et les apostrophes sont acceptés ; au moins 2 lettres ; début et
+  fin par une lettre. Les écritures non latines (arabe, chinois, cyrillique…), les chiffres, les
+  symboles et les emojis sont refusés partout (import CSV, saisie des candidats, approbation).
+  Le filtre porte sur les caractères, jamais sur l'origine d'un nom.
+- **Doublons** : le matricule est l'identifiant (unique). Les homonymes avec des matricules différents sont
+  permis. Une ligne importée **sans matricule** est refusée si le même nom et prénoms (accents, casse et
+  espaces ignorés) existent déjà avec la même date de naissance, ou sans date d'un côté.
 - **Dates** acceptées : `AAAA-MM-JJ`, `JJ/MM/AAAA`, `JJ-MM-AAAA` (pas de date future).
-- **Import CSV** : colonnes obligatoires `nom`, `prenoms`, `date_naissance`,
-  `filiere`, `niveau` ; facultatives `telephone`, `email`, `sexe`,
-  `allergies_affection`. Séparateurs `,` et `;` reconnus. Une erreur annule
-  tout l'import (`422`). Filières et niveaux inconnus sont créés.
+- **Import CSV** : **seules les colonnes `nom` et `prenoms` sont obligatoires** ; tout le reste est
+  facultatif : `matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`,
+  `allergies_affection` (dans n'importe quel ordre, colonnes absentes ou vides acceptées). Le matricule,
+  s'il est fourni, est importé tel quel après contrôle du format et de l'unicité. Séparateurs `,` et `;`
+  reconnus. Les lignes dont la première cellule commence par `#` sont ignorées. Une erreur annule tout
+  l'import (`422`, jusqu'à 50 erreurs détaillées par ligne). Filières et niveaux inconnus sont créés. Le
+  **modèle** [frontend/modele_import_etudiants.csv](frontend/modele_import_etudiants.csv) (bouton
+  « Télécharger le modèle CSV ») est prêt à remplir, avec la colonne `matricule`, des lignes d'aide et des
+  exemples commentés ; un test le fait passer dans le vrai importeur.
 
 Exemples :
 

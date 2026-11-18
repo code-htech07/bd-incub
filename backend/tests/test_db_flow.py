@@ -16,9 +16,9 @@ SECRET = "cle-secrete-de-test-0123456789abcdef0123"
 ADMIN_ID = "ZZTadmin"
 ADMIN_PASSWORD = "Mot-de-passe-test-1"
 CSV = (
-    "Nom;Prénom;Date de naissance;Filière;Niveau;Téléphone;Email;Sexe\n"
-    "Zztest;Alice;17/03/1998;ZZTEST Génie;ZZTEST L3;0102030405;alice@exemple.ci;f\n"
-    "Zztest;Bob;1999-05-02;ZZTEST Génie;ZZTEST L2;;;M\n"
+    "Matricule;Nom;Prénom;Date de naissance;Filière;Niveau;Téléphone;Email;Sexe\n"
+    "ZZTA1703980001;Zztest;Alice;17/03/1998;ZZTEST Génie;ZZTEST L3;0102030405;alice@exemple.ci;f\n"
+    "zztb0205990001;Zztest;Bob;1999-05-02;ZZTEST Génie;ZZTEST L2;;;M\n"
 )
 MATRICULE_ALICE = "ZZTA1703980001"
 MATRICULE_BOB = "ZZTB0205990001"
@@ -29,7 +29,7 @@ def cleanup():
         conn.execute("DELETE FROM etudiant_creation_demande WHERE matricule_saisi LIKE 'ZZT%'")
         conn.execute("DELETE FROM administrateur WHERE identifiant LIKE 'ZZT%'")
         conn.execute("DELETE FROM partenaire WHERE nom LIKE 'ZZT%'")
-        conn.execute("DELETE FROM etudiant WHERE matricule LIKE 'ZZT%'")
+        conn.execute("DELETE FROM etudiant WHERE matricule LIKE 'ZZT%' OR nom LIKE 'Zzt%'")
         conn.execute("DELETE FROM filiere WHERE libelle LIKE 'ZZTEST%'")
         conn.execute("DELETE FROM niveau WHERE libelle LIKE 'ZZTEST%'")
         conn.commit()
@@ -51,6 +51,10 @@ def import_csv(client, content=CSV):
     )
 
 
+def student(client, matricule):
+    return client.post("/api/verifier", json={"matricule": matricule}).json()["data"]
+
+
 def student_id(client, matricule):
     data = client.get("/api/get_etudiants", params={"q": matricule}).json()
     return data["data"][0]["id"]
@@ -64,7 +68,7 @@ def test_full_flow(client):
     # Doublon : refusé
     response = import_csv(client)
     assert response.status_code == 422
-    assert "dupliqué" in response.json()["errors"][0]
+    assert "matricule déjà présent" in response.json()["errors"][0]
 
     # --- Vérification publique ---
     response = client.post("/api/verifier", json={"matricule": MATRICULE_ALICE.lower()})
@@ -169,29 +173,30 @@ def test_full_flow(client):
                   if m["matricule"] == MATRICULE_ALICE][0]["id"]
     client.post("/api/admin_modifications", json={"id": request_id, "action": "reject"})
 
-    # Approbation changeant les prénoms : le matricule est recalculé
+    # Approbation changeant les prénoms : le matricule ne change JAMAIS (identifiant fourni, pas calculé)
     body = {"matricule": MATRICULE_ALICE, "prenoms": "Béatrice"}
     assert client.post("/api/demander_modification", json=body).status_code == 201
     request_id = [m for m in client.get("/api/admin_modifications").json()["data"]
                   if m["matricule"] == MATRICULE_ALICE][0]["id"]
     response = client.post("/api/admin_modifications", json={"id": request_id, "action": "approve"})
     assert response.status_code == 200, response.text
-    new_matricule = response.json()["matricule"]
-    assert new_matricule == "ZZTB1703980001"
+    assert response.json()["matricule"] == MATRICULE_ALICE
+    assert student(client, MATRICULE_ALICE)["prenoms"] == "Béatrice"
 
     # --- Mise à jour admin ---
-    beatrice = student_id(client, new_matricule)
+    beatrice = student_id(client, MATRICULE_ALICE)
     response = client.post("/api/update_etudiant", json={"id": beatrice, "email": "a@b.ci", "sexe": "M"})
     assert response.status_code == 200
     response = client.post("/api/update_etudiant", json={"id": beatrice, "date_naissance": "1998-03-18"})
     assert response.status_code == 200
-    assert response.json()["data"]["matricule"] == "ZZTB1803980001"
-    # Même nom/initiale/date que Bob (ZZTB0205990001) : conflit de matricule
-    response = client.post("/api/update_etudiant", json={"id": beatrice, "date_naissance": "02/05/1999"})
-    assert response.status_code == 409
+    assert response.json()["data"] == {}  # changer la date ne touche pas au matricule
+    assert student(client, MATRICULE_ALICE)["date_naissance"] == "1998-03-18"
+    # Un matricule déjà attribué ne se modifie pas (identifiant)
+    response = client.post("/api/update_etudiant", json={"id": beatrice, "matricule": "ZZTX0101000001"})
+    assert response.status_code == 422 and "déjà attribué" in response.json()["message"]
     response = client.post("/api/update_telephone", json={"id": beatrice, "telephone": "0505050505"})
     assert response.status_code == 200
-    data = client.post("/api/verifier", json={"matricule": "ZZTB1803980001"}).json()["data"]
+    data = student(client, MATRICULE_ALICE)
     assert data["email"] == "a@b.ci" and data["sexe"] == "M" and data["telephone"] == "0505050505"
 
     # --- Pointage ---
@@ -220,7 +225,7 @@ def test_failed_import_rolls_back_valid_rows(client):
 
 
 def test_unknown_matricule_creation_flow(client):
-    saisi = "ZZTNOUVEAU0001"
+    saisi = "ZZTC0506000001"
     # Matricule inconnu
     assert client.post("/api/verifier", json={"matricule": saisi}).status_code == 404
     # Le candidat renseigne ses informations -> demande en attente
@@ -232,7 +237,7 @@ def test_unknown_matricule_creation_flow(client):
     response = client.post("/api/demander_creation", json=body)
     assert response.status_code == 201, response.text
     # Rien n'est créé tant que l'admin n'a pas validé
-    assert client.post("/api/verifier", json={"matricule": "ZZTC0506000001"}).status_code == 404
+    assert client.post("/api/verifier", json={"matricule": saisi}).status_code == 404
     # Doublon de demande refusé
     assert client.post("/api/demander_creation", json=body).status_code == 409
     # L'admin voit la demande
@@ -243,14 +248,14 @@ def test_unknown_matricule_creation_flow(client):
     assert pending[0]["donnees"]["date_naissance"] == "2000-06-05"
     # Sans jeton : refusé
     assert client.get("/api/admin_creations", headers={"Authorization": "Bearer x"}).status_code == 401
-    # Approbation -> dossier créé avec le matricule calculé
+    # Approbation -> dossier créé avec le matricule SAISI par le candidat (jamais calculé)
     response = client.post("/api/admin_creations", json={"id": pending[0]["id"], "action": "approve"})
     assert response.status_code == 200, response.text
-    assert response.json()["matricule"] == "ZZTC0506000001"
+    assert response.json()["matricule"] == saisi
     assert client.post(
         "/api/admin_creations", json={"id": pending[0]["id"], "action": "approve"}
     ).status_code == 404
-    data = client.post("/api/verifier", json={"matricule": "ZZTC0506000001"}).json()["data"]
+    data = client.post("/api/verifier", json={"matricule": saisi}).json()["data"]
     assert data["nom"] == "Zztest" and data["sexe"] == "F" and data["filiere"] == "ZZTEST Génie"
     assert data["allergies_affection"] == "Arachides" and data["date_naissance"] == "2000-06-05"
     # Le dossier existe maintenant : nouvelle demande refusée
@@ -258,10 +263,10 @@ def test_unknown_matricule_creation_flow(client):
 
 
 def test_creation_request_can_be_rejected(client):
-    body = {"matricule": "ZZTREFUS0001", "nom": "Zztest", "prenoms": "Denis", "date_naissance": "1997-01-02"}
+    body = {"matricule": "ZZTD0201970001", "nom": "Zztest", "prenoms": "Denis", "date_naissance": "1997-01-02"}
     assert client.post("/api/demander_creation", json=body).status_code == 201
     pending = [r for r in client.get("/api/admin_creations").json()["data"]
-               if r["matricule_saisi"] == "ZZTREFUS0001"][0]
+               if r["matricule_saisi"] == "ZZTD0201970001"][0]
     response = client.post("/api/admin_creations", json={"id": pending["id"], "action": "reject"})
     assert response.json()["message"] == "Demande refusée."
     assert client.post("/api/verifier", json={"matricule": "ZZTD0201970001"}).status_code == 404
@@ -379,8 +384,13 @@ def test_approve_all_pending_requests(client):
     for matricule, phone in ((MATRICULE_ALICE, "0111111111"), (MATRICULE_BOB, "0222222222")):
         assert client.post("/api/demander_modification", json={"matricule": matricule, "telephone": phone}).status_code == 201
     carole = {"nom": "Zztest", "prenoms": "Carole", "date_naissance": "2000-06-05", "filiere": "ZZTEST Génie"}
-    assert client.post("/api/demander_creation", json={"matricule": "ZZTBULK0001", **carole}).status_code == 201
-    assert client.post("/api/demander_creation", json={"matricule": "ZZTBULK0002", **carole}).status_code == 201  # même dossier calculé
+    assert client.post("/api/demander_creation", json={"matricule": "ZZTC0506000001", **carole}).status_code == 201
+    other = {**carole, "prenoms": "Carine"}
+    assert client.post("/api/demander_creation", json={"matricule": "ZZTC0506000002", **other}).status_code == 201
+    # Ce matricule est attribué par ailleurs avant l'approbation : sa demande échouera, sans bloquer les autres
+    with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
+        conn.execute("INSERT INTO etudiant (matricule, nom, prenoms) VALUES ('ZZTC0506000002', 'Zztest', 'Autre')")
+        conn.commit()
 
     anonymous = TestClient(create_app())
     with anonymous:
@@ -391,7 +401,7 @@ def test_approve_all_pending_requests(client):
     assert body["modifications"] == {"approuvees": 2, "echecs": []}
     assert body["creations"]["approuvees"] == 1
     assert len(body["creations"]["echecs"]) == 1
-    assert "matricule" in body["creations"]["echecs"][0]["message"].lower()
+    assert "existe déjà" in body["creations"]["echecs"][0]["message"]
     assert "1 demande(s) n'ont pas pu" in body["message"]
 
     # Les changements sont appliqués ; la demande en échec reste en attente
@@ -399,7 +409,7 @@ def test_approve_all_pending_requests(client):
     assert client.post("/api/verifier", json={"matricule": MATRICULE_BOB}).json()["data"]["telephone"] == "0222222222"
     assert client.post("/api/verifier", json={"matricule": "ZZTC0506000001"}).status_code == 200
     pending = [r["matricule_saisi"] for r in client.get("/api/admin_creations").json()["data"]]
-    assert len(pending) == 1 and pending[0].startswith("ZZTBULK")
+    assert pending == ["ZZTC0506000002"]
     assert client.get("/api/admin_modifications").json()["data"] == []
     # Plus rien à approuver (sauf la demande en échec, toujours refusée)
     again = client.post("/api/admin_approve_all").json()

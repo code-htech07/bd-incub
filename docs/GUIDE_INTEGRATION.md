@@ -133,14 +133,15 @@ crée pas de doublon. `numero_candidat` est facultatif.
 
 ## 5. Le matricule
 
-Le matricule est calculé ainsi (sans accents, en majuscules) :
+Le matricule est un identifiant **fourni** (jamais calculé par l'API). Son format :
 
 ```
-3 premières lettres du nom + 1re lettre du prénom + jjmmaa de naissance + 0001
+3 ou 4 lettres majuscules + 6 chiffres (date jjmmaa) + 4 chiffres
 Kouadio Alain, né le 17/03/1998  →  KOUA 1703 98 0001  →  KOUA1703980001
 ```
 
-L'API ignore les espaces autour et la casse. Longueur maximale : 40 caractères.
+L'API ignore les espaces autour et la casse. Longueur maximale : 40 caractères. Un étudiant dont le
+matricule n'a pas encore été attribué n'est pas vérifiable.
 
 ---
 

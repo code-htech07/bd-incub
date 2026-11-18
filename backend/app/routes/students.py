@@ -11,10 +11,10 @@ from .. import audit
 from ..auth import require_admin
 from ..db import Database, get_db
 from ..errors import ApiError, respond
+from ..student_rules import validate_matricule, validate_name
 from ..student_helpers import (
     byte_length,
     parse_student_date,
-    student_matricule,
     valid_email,
 )
 from .. import docs as d
@@ -108,8 +108,13 @@ def _validated_fields(data: dict) -> dict[str, Any]:
                 raise ApiError(
                     422, "Le nom et les prénoms sont obligatoires (150 caractères maximum)."
                 )
-            changes[field] = value
+            try:
+                changes[field] = validate_name(value, "Nom" if field == "nom" else "Prénoms")
+            except ValueError as error:
+                raise ApiError(422, str(error))
         elif field == "date_naissance":
+            if not value:
+                continue  # date facultative : champ vide = non renseigné
             parsed = parse_student_date(value)
             if not parsed:
                 raise ApiError(422, "Date de naissance invalide.")
@@ -217,8 +222,10 @@ def request_modification(
     summary="Soumettre son dossier quand le matricule est inconnu",
     description="Un candidat dont le matricule n'est pas en base renseigne ses informations. "
     "La demande est enregistrée **en attente** : le dossier n'est créé qu'après validation "
-    "par un administrateur, avec le matricule calculé à partir du nom, du prénom et de la "
-    "date de naissance. Nom, prénoms et date de naissance sont obligatoires.",
+    "par un administrateur, avec **le matricule saisi par le candidat** (il n'est pas calculé : il doit "
+    "respecter le format, ex. `KOUA1703980001`, et ne pas exister déjà). **Le matricule, le nom et les "
+    "prénoms sont obligatoires**, la date de naissance est facultative ; nom et prénoms n'acceptent que "
+    "les lettres de l'alphabet français, espaces, tirets et apostrophes.",
     response_model=None,
     responses={
         201: {"model": d.SuccessResponse, "description": "Demande transmise."},
@@ -230,26 +237,23 @@ def request_creation(body: Any = Depends(json_body), db: Database = Depends(get_
     data = json_object(body)
     matricule = _clean_matricule(data)
     audit.annotate(target_type="matricule", target=matricule)
-    fields = _validated_fields(data)
-    if not all(fields.get(key) for key in ("nom", "prenoms", "date_naissance")):
-        raise ApiError(422, "Le nom, les prénoms et la date de naissance sont obligatoires.")
     try:
-        computed = student_matricule(fields["nom"], fields["prenoms"], fields["date_naissance"])
+        matricule = validate_matricule(matricule)
     except ValueError as error:
         raise ApiError(422, str(error))
-    audit.annotate(matricule_calcule=computed, champs=sorted(fields))
+    fields = _validated_fields(data)
+    if not all(fields.get(key) for key in ("nom", "prenoms")):
+        raise ApiError(422, "Le nom et les prénoms sont obligatoires.")
+    audit.annotate(champs=sorted(fields))
 
     try:
         with db.transaction():
             with db.cursor() as cursor:
-                cursor.execute(
-                    "SELECT 1 FROM etudiant WHERE matricule = %s OR matricule = %s",
-                    (matricule, computed),
-                )
+                cursor.execute("SELECT 1 FROM etudiant WHERE matricule = %s", (matricule,))
                 if cursor.fetchone():
                     raise ApiError(
                         409,
-                        "Un dossier existe déjà pour ce matricule ou ces informations : "
+                        "Un dossier existe déjà pour ce matricule : "
                         "utilisez la vérification de votre matricule.",
                     )
                 cursor.execute(
@@ -321,39 +325,52 @@ def update_student(body: Any = Depends(json_body), db: Database = Depends(get_db
         assignments.append(f"{field} = %s")
         parameters.append(value or None)
 
+    # Date de naissance et matricule : le matricule n'est JAMAIS recalculé. Il peut seulement être
+    # attribué à un étudiant qui n'en a pas encore (import sans matricule) ; un matricule existant
+    # est un identifiant et ne se modifie pas.
     new_matricule = None
+    same_matricule = False
     raw_birth = data.get("date_naissance")
+    raw_matricule = data.get("matricule")
+    birth_date = None
     if raw_birth is not None and raw_birth != "":
         if not isinstance(raw_birth, str):
             raise ApiError(422, "Date de naissance invalide.")
         birth_date = parse_student_date(raw_birth)
         if not birth_date:
             raise ApiError(422, "Date de naissance invalide.")
+    if raw_matricule is not None and raw_matricule != "":
+        try:
+            new_matricule = validate_matricule(raw_matricule)
+        except ValueError as error:
+            raise ApiError(422, str(error))
+    if birth_date or new_matricule:
         try:
             with db.cursor() as cursor:
                 cursor.execute(
-                    "SELECT matricule, nom, prenoms, date_naissance FROM etudiant WHERE id = %s",
-                    (student_id,),
+                    "SELECT matricule, date_naissance FROM etudiant WHERE id = %s", (student_id,)
                 )
                 student = cursor.fetchone()
                 if not student:
                     raise ApiError(404, "Étudiant introuvable.")
-                try:
-                    new_matricule = student_matricule(
-                        student["nom"], student["prenoms"], birth_date
-                    )
-                except ValueError as error:
-                    raise ApiError(422, str(error))
-                if new_matricule != student["matricule"]:
-                    cursor.execute(
-                        "SELECT id FROM etudiant WHERE matricule = %s AND id <> %s",
-                        (new_matricule, student_id),
-                    )
-                    if cursor.fetchone():
-                        raise ApiError(409, "Le matricule calculé existe déjà.")
-                    assignments.append("matricule = %s")
-                    parameters.append(new_matricule)
-                if birth_date != str(student["date_naissance"]):
+                if new_matricule:
+                    if student["matricule"] and student["matricule"] != new_matricule:
+                        raise ApiError(
+                            422, "Le matricule est déjà attribué et ne peut pas être modifié."
+                        )
+                    if student["matricule"] == new_matricule:
+                        new_matricule = None  # déjà le sien : rien à faire
+                        same_matricule = True
+                    else:
+                        cursor.execute(
+                            "SELECT id FROM etudiant WHERE matricule = %s AND id <> %s",
+                            (new_matricule, student_id),
+                        )
+                        if cursor.fetchone():
+                            raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
+                        assignments.append("matricule = %s")
+                        parameters.append(new_matricule)
+                if birth_date and birth_date != str(student["date_naissance"]):
                     assignments.append("date_naissance = %s")
                     parameters.append(birth_date)
         except psycopg.Error:
@@ -361,6 +378,8 @@ def update_student(body: Any = Depends(json_body), db: Database = Depends(get_db
             raise ApiError(500, "Erreur lors de la lecture du dossier étudiant.")
 
     if not assignments:
+        if same_matricule:  # le matricule demandé est déjà celui de l'étudiant : succès sans effet
+            return respond(200, {"status": "success", "message": "Fiche inchangée.", "data": {}})
         raise ApiError(400, "Données incomplètes.")
 
     try:
@@ -375,7 +394,7 @@ def update_student(body: Any = Depends(json_body), db: Database = Depends(get_db
         raise ApiError(500, "Erreur de base de données.")
     audit.annotate(
         champs=[a.split(" = ")[0] for a in assignments],
-        matricule_nouveau=new_matricule,
+        matricule_attribue=bool(new_matricule),
     )
     return respond(
         200,

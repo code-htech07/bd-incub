@@ -1,6 +1,6 @@
-# Concours Génie UPB
+# Base de données des étudiants de UPB
 
-Application web de gestion du concours Génie UPB : recherche et inscription des
+Application web de gestion de la base de données des étudiants de l'UPB : recherche et inscription des
 étudiants, demandes de correction de dossier, administration, import CSV et
 pointage des présences par QR code.
 

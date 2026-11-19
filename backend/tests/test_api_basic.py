@@ -360,3 +360,57 @@ def test_frontend_targets_a_configurable_api_url(client):
         assert '<script src="config.js"></script>' in page, path
         assert "fetch('/api" not in page and 'fetch("/api' not in page, path  # toujours préfixé par API
         assert "UPB_API_URL" in page, path
+
+
+def test_schema_problems_detects_missing_migrations():
+    from app import db
+
+    class FakeConnection:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def execute(self, _sql):
+            return self
+
+        def fetchall(self):
+            return self.rows
+
+    full = [("pointage_journalier", "id", "NO"), ("etudiant", "email", "YES"), ("etudiant", "matricule", "YES"),
+            ("etudiant_modification", "id", "NO"), ("etudiant_creation_demande", "id", "NO"),
+            ("administrateur", "id", "NO"), ("partenaire", "id", "NO"), ("journal_activite", "id", "NO"),
+            ("partenaire_cle", "id", "NO")]
+    assert db.schema_problems(FakeConnection(full)) == []
+    # Base de production restée avant la migration 09 : matricule encore NOT NULL
+    outdated = [(t, c, "NO" if (t, c) == ("etudiant", "matricule") else n) for t, c, n in full]
+    assert db.schema_problems(FakeConnection(outdated)) == ["09_matricule_facultatif.sql"]
+    # Tables des migrations 07 et 08 absentes
+    partial = [r for r in full if r[0] not in ("journal_activite", "partenaire_cle")]
+    assert db.schema_problems(FakeConnection(partial)) == ["07_journal_activite.sql", "08_integrations.sql"]
+
+
+def test_schema_errors_get_an_actionable_message():
+    import psycopg
+    from app import db
+
+    for error in (psycopg.errors.NotNullViolation("null value in column matricule"),
+                  psycopg.errors.UndefinedTable("relation partenaire_cle does not exist"),
+                  psycopg.errors.UndefinedColumn("column x does not exist")):
+        assert "scripts.migrate" in db.schema_hint(error)
+    assert db.schema_hint(psycopg.errors.UniqueViolation("doublon")) is None
+    assert db.schema_hint(ValueError("autre")) is None
+
+
+def test_health_reports_an_outdated_schema(client, monkeypatch):
+    from app import db
+    monkeypatch.setattr(db, "schema_problems", lambda _connection: ["09_matricule_facultatif.sql"])
+    response = client.get("/api/sante", params={"base": 1})
+    assert response.status_code == 503
+    body = response.json()
+    assert body["migrations_manquantes"] == ["09_matricule_facultatif.sql"] and "scripts.migrate" in body["message"]
+    assert client.get("/api/sante").status_code == 200  # la supervision simple n'est pas affectée
+
+
+def test_health_with_database_check_on_the_real_schema(client):
+    response = client.get("/api/sante", params={"base": 1})
+    assert response.status_code == 200, response.text  # base de développement à jour (migrations 01 à 09)
+    assert response.json() == {"status": "ok"}

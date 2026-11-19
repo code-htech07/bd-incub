@@ -429,3 +429,18 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   tout vide sauf nom et prénoms, colonnes `nom` et `prenoms` obligatoires, formats de matricule valides et
   invalides, doublons, attribution ultérieure, modèle de bout en bout, saisies des candidats, corrections qui ne
   changent jamais le matricule. Autres tests adaptés au matricule fourni.
+
+## Étape 17 — Import en erreur 500 en production : schéma de base en retard
+
+- **Cause** : la base de production n'avait pas la migration `09_matricule_facultatif.sql` (ajoutée après le guide de
+  déploiement) : `etudiant.matricule` y était encore NOT NULL, donc toute ligne importée **sans matricule** échouait
+  (500) alors que l'import **avec matricule** passait. Reproduit dans un schéma isolé (copie des tables avant la
+  migration 09, supprimé ensuite) : avec matricule 201, sans matricule 500. Les tests locaux utilisent la base de
+  développement, déjà à jour.
+- **Message clair** : les erreurs de schéma (table ou colonne absente, NULL refusé) renvoient désormais « La base de
+  données n'est pas à jour : appliquez les migrations (python -m scripts.migrate) sur cette base. » à l'import et dans le
+  gestionnaire d'erreurs global, au lieu d'un message générique.
+- **Détection** : `db.schema_problems` vérifie que l'objet créé par chaque migration (01 à 09) existe ;
+  `GET /api/sante?base=1` répond 503 avec `migrations_manquantes` si la base est en retard ; au démarrage, le journal de
+  Render écrit « SCHÉMA DE BASE OBSOLÈTE » (contrôle en tâche de fond, sans retarder le démarrage).
+- **Correctif de production** : appliquer les migrations sur la base de production (guide de déploiement, étape 1).

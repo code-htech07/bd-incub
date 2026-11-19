@@ -1,6 +1,7 @@
 """Application FastAPI : API JSON (/api/...) + service du frontend statique."""
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -57,6 +58,7 @@ TAGS = [
 async def lifespan(_app: FastAPI):
     try:
         db.open_pool()
+        threading.Thread(target=db.log_schema_status, daemon=True).start()  # n'attend pas la base
     except RuntimeError:
         logger.exception("Pool de connexions non ouvert (DATABASE_URL manquant ?)")
     yield
@@ -118,13 +120,23 @@ def create_app() -> FastAPI:
     def health(base: bool = False):
         """Point de santé pour la supervision (UptimeRobot). Sans paramètre, il ne touche PAS la base :
         la supervision peut ainsi tourner sans empêcher Neon de se mettre en veille.
-        `?base=1` vérifie aussi la connexion à la base (diagnostic manuel)."""
+        `?base=1` vérifie aussi la connexion à la base et que les migrations sont à jour (diagnostic manuel)."""
         if base:
             try:
                 with db.audit_connection() as connection:
                     connection.execute("SELECT 1")
+                    missing = db.schema_problems(connection)
             except Exception:  # noqa: BLE001
                 return UpbJSONResponse({"status": "error", "message": "Base de données injoignable."}, status_code=503)
+            if missing:
+                return UpbJSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Schéma de base de données obsolète. " + db.SCHEMA_HELP,
+                        "migrations_manquantes": missing,
+                    },
+                    status_code=503,
+                )
         return UpbJSONResponse({"status": "ok"})
 
     register_error_handlers(app)

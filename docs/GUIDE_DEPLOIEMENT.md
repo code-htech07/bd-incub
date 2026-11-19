@@ -235,7 +235,7 @@ suspendrait les services gratuits avant la fin du mois.
 
 Dans l'ordre, sur les adresses de production :
 
-- [ ] `/api/sante?base=1` répond `ok` (Render ↔ Neon).
+- [ ] `/api/sante?base=1` répond `ok` (Render ↔ Neon **et schéma à jour** : s'il liste des `migrations_manquantes`, appliquez-les, voir §8).
 - [ ] Connexion à `/admin.html` avec l'identifiant créé à l'étape 1.
 - [ ] Import d'un petit fichier CSV d'étudiants ; la liste et les statistiques s'affichent.
 - [ ] Portail candidat (`/`) : un matricule connu affiche le dossier ; un inconnu affiche
@@ -263,7 +263,7 @@ Aux sites externes, communiquez : l'**URL de l'API** (`https://upb-api.onrender.
 | Besoin | Marche à suivre |
 |---|---|
 | Mettre à jour le code | `git push` : Netlify (pages) et Render (API) redéploient seuls |
-| Changer le schéma de la base | Lancer `python -m scripts.migrate` **depuis votre poste, avant** de pousser le code qui en dépend (l'offre gratuite de Render n'a pas de commande de pré-déploiement) |
+| Changer le schéma de la base | **Chaque fois qu'un fichier est ajouté dans `backend/migrations/`**, lancer `python -m scripts.migrate` **sur la base de production, depuis votre poste, avant** de pousser le code qui en dépend (l'offre gratuite de Render n'a pas de commande de pré-déploiement ; voir l'étape 1 pour les variables à définir). Contrôle : `https://<api>/api/sante?base=1` doit répondre `ok`, sinon il liste les `migrations_manquantes`. Au démarrage, Render écrit aussi « SCHÉMA DE BASE OBSOLÈTE » dans ses logs |
 | Lire les logs de l'API | Render → *Logs* |
 | Nouvel administrateur / mot de passe oublié | `python -m scripts.create_admin IDENTIFIANT` (étape 1) ; la même commande réinitialise un mot de passe |
 | Déconnecter tous les admins | Changer `UPB_SECRET_KEY` sur Render |
@@ -283,7 +283,9 @@ Aux sites externes, communiquez : l'**URL de l'API** (`https://upb-api.onrender.
 | Première requête très lente (30 s à 1 min) | Service Render endormi ou redémarré | Vérifier le moniteur UptimeRobot (adresse, intervalle) |
 | Build Render en échec | Mauvais *Root Directory* ou version de Python | Root Directory = `backend` ; `PYTHON_VERSION=3.12.10` |
 | « Port scan timeout » / aucun port détecté | Commande de démarrage incorrecte | Utiliser exactement `--host 0.0.0.0 --port $PORT` |
-| `/api/sante?base=1` renvoie 503 | `DATABASE_URL` erronée, ou base Neon en réveil | Vérifier l'URL (poolée, `sslmode=require`) ; réessayer |
+| `/api/sante?base=1` renvoie 503 « Base de données injoignable » | `DATABASE_URL` erronée, ou base Neon en réveil | Vérifier l'URL (poolée, `sslmode=require`) ; réessayer |
+| `/api/sante?base=1` renvoie 503 « Schéma de base de données obsolète » (`migrations_manquantes`) | La base de production n'a pas reçu les dernières migrations | Étape 1 : `python -m scripts.migrate` contre la base de **production** |
+| Import CSV : erreur 500 « La base de données n'est pas à jour… » (marche en local) | Même cause : base de production en retard (ex. migration 09 : matricule facultatif, requise pour importer des lignes sans matricule) | Appliquer les migrations sur la base de production ; l'import avec matricule fonctionnait déjà |
 | « Trop de tentatives échouées » pour tout le monde | Adresse IP mal détectée (§5.2) | Ajuster `UPB_TRUSTED_PROXY_HOPS` ; le blocage expire après 15 min |
 | Connexion admin impossible (`503 Accès administrateur non configuré`) | `UPB_SECRET_KEY` absente ou trop courte (32 caractères minimum) | La définir sur Render |
 | Connexion admin refusée alors que le mot de passe est bon | Administrateur créé dans une autre base | Refaire `create_admin` contre la base de **production** (étape 1) |

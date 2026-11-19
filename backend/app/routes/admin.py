@@ -14,6 +14,7 @@ from .. import config
 from .. import audit
 from ..auth import require_admin
 from ..db import Database, get_db
+from ..db import schema_hint as db_schema_hint
 from ..errors import ApiError, respond
 from ..student_helpers import (
     fix_encoding,
@@ -547,10 +548,11 @@ def import_students(
                     )
                 if imported == 0:
                     raise ApiError(422, "Le fichier ne contient aucun étudiant à importer.")
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Import CSV UPB")
         raise ApiError(
-            500, "Erreur lors de l'import. Vérifiez le format CSV et le schéma de la base."
+            500,
+            "Erreur lors de l'import. " + (db_schema_hint(error) or "Vérifiez le format CSV et réessayez."),
         )
 
     audit.annotate(importes=imported, sans_matricule=without_matricule)

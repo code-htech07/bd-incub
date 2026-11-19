@@ -101,3 +101,68 @@ def get_db() -> Iterator[Database]:
         yield database
     finally:
         database.release()
+
+
+# --------------------------------------------------------------------------- version du schéma
+# Une migration est considérée comme appliquée si l'objet qu'elle crée existe. Sert à détecter une base
+# (ex. de production) restée en retard après une mise à jour du code.
+MIGRATION_PROBES: tuple[tuple[str, str, str | None, str | None], ...] = (
+    # (fichier, table, colonne à exiger, "nullable" pour exiger une colonne facultative)
+    ("01_pointage.sql", "pointage_journalier", None, None),
+    ("02_etudiant_contact.sql", "etudiant", "email", None),
+    ("03_inscription_migrations.sql", "etudiant_modification", None, None),
+    ("04_etudiant_creation_demande.sql", "etudiant_creation_demande", None, None),
+    ("05_administrateur.sql", "administrateur", None, None),
+    ("06_partenaire.sql", "partenaire", None, None),
+    ("07_journal_activite.sql", "journal_activite", None, None),
+    ("08_integrations.sql", "partenaire_cle", None, None),
+    ("09_matricule_facultatif.sql", "etudiant", "matricule", "nullable"),
+)
+
+
+def schema_problems(connection) -> list[str]:
+    """Fichiers de migration manquants (liste vide : schéma à jour)."""
+    rows = connection.execute(
+        "SELECT table_name, column_name, is_nullable FROM information_schema.columns "
+        "WHERE table_schema = current_schema()"
+    ).fetchall()
+    columns = {(r[0], r[1]): r[2] for r in rows}
+    tables = {r[0] for r in rows}
+    missing = []
+    for filename, table, column, require in MIGRATION_PROBES:
+        if table not in tables:
+            missing.append(filename)
+        elif column and (table, column) not in columns:
+            missing.append(filename)
+        elif require == "nullable" and columns.get((table, column)) != "YES":
+            missing.append(filename)
+    return missing
+
+
+SCHEMA_HELP = (
+    "La base de données n'est pas à jour : appliquez les migrations (python -m scripts.migrate) "
+    "sur cette base."
+)
+
+
+def schema_hint(error: BaseException) -> str | None:
+    """Message clair si l'erreur vient d'un schéma en retard (colonne/table absente, NULL refusé)."""
+    if isinstance(
+        error,
+        (psycopg.errors.UndefinedTable, psycopg.errors.UndefinedColumn, psycopg.errors.NotNullViolation),
+    ):
+        return SCHEMA_HELP
+    return None
+
+
+def log_schema_status() -> None:
+    """Journalise (sans bloquer le démarrage) les migrations manquantes."""
+    try:
+        with audit_connection() as connection:
+            missing = schema_problems(connection)
+        if missing:
+            logger.error("SCHÉMA DE BASE OBSOLÈTE — migrations manquantes : %s. %s", ", ".join(missing), SCHEMA_HELP)
+        else:
+            logger.info("Schéma de base de données à jour.")
+    except Exception:  # noqa: BLE001
+        logger.exception("Contrôle du schéma impossible (base injoignable ?)")

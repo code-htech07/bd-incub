@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import audit
+from .db import schema_hint
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,9 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(psycopg.Error)
     async def database_error(_request: Request, error: psycopg.Error):
         audit.annotate(message="Erreur de base de données.")
+        hint = schema_hint(error)
         logger.error(
             "Erreur de base de données non gérée",
             exc_info=(type(error), error, error.__traceback__),
         )
-        return respond(500, {"status": "error", "message": "Erreur de base de données."})
+        return respond(500, {"status": "error", "message": hint or "Erreur de base de données."})

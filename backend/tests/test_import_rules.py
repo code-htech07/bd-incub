@@ -142,9 +142,9 @@ def test_invalid_matricule_format_is_rejected_with_its_line(client, bad):
 
 def test_duplicate_matricules_are_rejected(client):
     assert import_csv(client, "nom;prenoms;matricule\nZztest;Alice;ZZTA1703980001\n").status_code == 201
-    # Déjà en base (casse ignorée) puis doublon dans le même fichier
-    response = import_csv(client, "nom;prenoms;matricule\nZztest;Autre;zzta1703980001\n")
-    assert response.status_code == 422 and "matricule déjà présent" in response.json()["errors"][0]
+    # Déjà en base (casse ignorée) mais attribué à une autre personne (nom sans rapport), puis doublon dans le fichier
+    response = import_csv(client, "nom;prenoms;matricule\nZzxwvuts;Autre;zzta1703980001\n")
+    assert response.status_code == 422 and "appartient à un autre étudiant" in response.json()["errors"][0]
     response = import_csv(client, "nom;prenoms;matricule\nZztest;Bob;ZZTB0205990001\nZztest;Bobby;ZZTB0205990001\n")
     assert response.status_code == 422 and response.json()["errors"][0].startswith("Ligne 3")
     assert listing(client)["total"] == 1
@@ -156,17 +156,15 @@ def test_homonyms_with_different_matricules_are_allowed(client):
     assert listing(client)["total"] == 2
 
 
-def test_rows_without_matricule_are_checked_for_duplicates_by_name(client):
+def test_rows_without_matricule_are_matched_by_name(client):
     assert import_csv(client, "nom;prenoms;matricule\nZztest;Alice;ZZTA1703980001\nZztest;Bob;\n").status_code == 201
-    # Même nom et prénoms (accents, casse, espaces ignorés), sans matricule : doublon d'un étudiant AVEC matricule…
-    for row in ("ZZTEST;alice", " Zztest ;  Alice "):
+    # Même nom et prénoms (accents, casse, espaces ignorés), sans matricule : c'est le même étudiant, rien de créé
+    for row in ("ZZTEST;alice", " Zztest ;  Alice ", "Zztest;Bob"):
         response = import_csv(client, "nom;prenoms\n" + row + "\n")
-        assert response.status_code == 422, row
-        assert "doublon" in response.json()["errors"][0] and "ZZTA1703980001" in response.json()["errors"][0]
-    # …ou d'un étudiant lui-même sans matricule
-    response = import_csv(client, "nom;prenoms\nZztest;Bob\n")
-    assert response.status_code == 422 and "sans matricule" in response.json()["errors"][0]
-    # Doublon dans le même fichier
+        assert response.status_code == 201, row
+        assert response.json()["imported"] == 0 and response.json()["unchanged"] == 1, row
+    assert listing(client)["total"] == 2
+    # Répété dans le même fichier (sans matricule) : erreur
     response = import_csv(client, "nom;prenoms\nZztest;Dina\nZztest;Dina\n")
     assert response.status_code == 422 and response.json()["errors"][0].startswith("Ligne 3")
     # Dates connues et différentes : ce sont deux personnes

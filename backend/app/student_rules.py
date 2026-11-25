@@ -77,7 +77,7 @@ def validate_matricule(value) -> str:
 # Un étudiant importé SANS matricule ne peut être identifié que par son nom : on refuse alors un homonyme
 # exact (accents, casse, espaces ignorés) dont la date de naissance est identique ou inconnue d'un côté.
 # Les lignes AVEC matricule ne sont contrôlées que sur l'unicité du matricule (les homonymes y sont permis).
-def _name_key(nom: str, prenoms: str):
+def name_key(nom: str, prenoms: str):
     try:
         return normalize_student_name(nom), normalize_student_name(prenoms)
     except ValueError:
@@ -89,7 +89,7 @@ def load_name_index(cursor) -> dict:
     cursor.execute("SELECT matricule, nom, prenoms, date_naissance FROM etudiant")
     index: dict = {}
     for row in cursor.fetchall():
-        key = _name_key(row["nom"], row["prenoms"])
+        key = name_key(row["nom"], row["prenoms"])
         if key:
             index.setdefault(key, []).append(
                 (row["matricule"], str(row["date_naissance"]) if row["date_naissance"] else None)
@@ -98,14 +98,14 @@ def load_name_index(cursor) -> dict:
 
 
 def index_add(index: dict, nom: str, prenoms: str, birth_iso: str | None, matricule: str | None) -> None:
-    key = _name_key(nom, prenoms)
+    key = name_key(nom, prenoms)
     if key:
         index.setdefault(key, []).append((matricule, birth_iso))
 
 
 def index_find(index: dict, nom: str, prenoms: str, birth_iso: str | None):
     """(matricule ou None) du premier homonyme incompatible, ou False s'il n'y en a pas."""
-    key = _name_key(nom, prenoms)
+    key = name_key(nom, prenoms)
     for matricule, existing in index.get(key, []) if key else []:
         if birth_iso is None or existing is None or existing == birth_iso:
             return matricule

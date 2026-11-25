@@ -126,7 +126,7 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 | `GET /api/admin_journal/export` | admin | Export CSV du journal (mêmes filtres, 20 000 lignes max) |
 | `POST /api/admin_logout` | admin | Enregistre la déconnexion dans le journal |
 | `POST /api/admin_export` | admin | Enregistre un export Excel/PDF réalisé dans le navigateur |
-| `POST /api/import_etudiants` | admin | Import CSV (5 Mo / 5 000 lignes max, tout ou rien) |
+| `POST /api/import_etudiants` | admin | Import CSV (5 Mo / 5 000 lignes max, tout ou rien) ; **réimportable** : met à jour les étudiants existants (matricule, ou nom et prénoms sans matricule), cellule vide = valeur en base conservée |
 | `GET /api/pointage` | admin | Présences d'une date (`date=AAAA-MM-JJ`, `jour`) |
 | `POST /api/pointage` | admin | Enregistrer une présence (`matricule`, `date`, `jour_libelle`) ; `409` si double pointage |
 

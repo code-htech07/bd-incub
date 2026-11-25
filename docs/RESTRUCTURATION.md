@@ -558,3 +558,32 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
 - Le délai est un engagement affiché à l'étudiant : il suppose que les demandes soient traitées dans les 12 h. Aucun changement
   de schéma.
 - Tests : `tests/test_mail_and_names.py`.
+
+### Complément (étape 21) — erreurs de décision explicites
+
+- Une erreur de base lors d'une décision (`/api/admin_creations`, `/api/admin_modifications`), d'une création, d'une
+  désinscription, d'une suppression ou du chargement des demandes renvoie `500` ; si la cause est un schéma en retard
+  (colonne ou table absente, ex. migration 10 non appliquée), le message ajoute « appliquez les migrations (python -m
+  scripts.migrate) sur cette base ». Toute autre erreur reste générique.
+- Diagnostic en production : `https://<api>/api/sante?base=1` liste les `migrations_manquantes` ; le détail de l'erreur est dans
+  les logs Render (« Traitement de demande de création UPB »).
+
+## Étape 23 — L'import CSV met à jour les étudiants existants
+
+- Un fichier peut être **réimporté** : les étudiants déjà en base ne bloquent plus l'import. Chaque ligne est rapprochée :
+  - **avec matricule** : si le matricule existe, l'étudiant est mis à jour (le nom et les prénoms du fichier doivent lui
+    ressembler, sinon erreur « le matricule X appartient à un autre étudiant » : protège d'un matricule mal attribué ; une faute
+    d'orthographe légère corrige le nom en base). Si le matricule est nouveau, il **complète** l'étudiant de même nom qui n'a pas
+    encore de matricule (aucun doublon) ; à défaut, un étudiant est créé (les homonymes avec matricules différents restent
+    permis) ;
+  - **sans matricule** : rapprochement par **nom et prénoms** (accents, casse, espaces ignorés) et par la date de naissance
+    quand elle est connue des deux côtés (deux dates différentes = deux personnes). Un seul correspondant : mise à jour (son nom
+    n'est pas réécrit) ; aucun : création sans matricule ; plusieurs : erreur « précisez le matricule ou la date de
+    naissance ». Le même nom sans matricule répété dans le fichier reste une erreur.
+- **Une cellule vide conserve la valeur en base** ; seules les cellules renseignées et différentes sont écrites.
+- Toujours **tout ou rien** : une erreur annule aussi les mises à jour du fichier. Doublon de matricule dans le fichier : erreur.
+- Réponse : `imported` (créés), `updated`, `unchanged`, `sans_matricule`, `matricules` (créés ou mis à jour) ; message
+  « Import terminé : x créé(s), y mis à jour, z inchangé(s). ». Le journal garde les volumes (`importes`, `mis_a_jour`,
+  `inchanges`). Aide de la page et du modèle CSV mises à jour. Aucun changement de schéma.
+- Remplace le comportement des étapes 15–16 « homonyme exact sans matricule refusé comme doublon ».
+- Tests : `tests/test_import_update.py` ; `test_import_rules.py` et `test_db_flow.py` adaptés.

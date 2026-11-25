@@ -420,3 +420,23 @@ def test_refusal_mail_gets_the_link_from_the_admin_request_headers(client, resen
     assert 'href="https://autre.exemple.ci"' in mail["html"]
     mail = refuse({"Origin": "http://evil.ci"})  # origine inutilisable : pas de bouton
     assert "Mettre à jour mes informations" not in mail["html"]
+
+
+# ------------------------------------------------------------------ erreur 500 explicite quand la base est en retard
+def test_decision_500_names_the_missing_migration(client, monkeypatch):
+    import psycopg
+    from app import db as database
+
+    def missing_column(*args, **kwargs):
+        raise psycopg.errors.UndefinedColumn('column "commentaire" of relation "etudiant_creation_demande" does not exist')
+
+    monkeypatch.setattr(database.Database, "transaction", missing_column)
+    for url in ("/api/admin_creations", "/api/admin_modifications"):
+        response = client.post(url, json={"id": 1, "action": "reject", "commentaire": "Motif"})
+        assert response.status_code == 500, url
+        message = response.json()["message"]
+        assert message.startswith("Erreur lors du traitement de la demande.") and "scripts.migrate" in message
+    # Une autre erreur de base reste générique (aucun détail technique exposé)
+    monkeypatch.setattr(database.Database, "transaction", lambda *a, **k: (_ for _ in ()).throw(psycopg.errors.DeadlockDetected("x")))
+    response = client.post("/api/admin_creations", json={"id": 1, "action": "approve"})
+    assert response.status_code == 500 and response.json()["message"] == "Erreur lors du traitement de la demande."

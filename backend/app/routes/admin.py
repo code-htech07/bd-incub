@@ -27,6 +27,7 @@ from ..student_helpers import byte_length
 from ..student_rules import (
     best_name_match,
     load_students_for_matching,
+    name_key,
     name_level,
     name_similarity,
     REFERENCE_VALIDATORS,
@@ -227,9 +228,9 @@ def list_modifications(db: Database = Depends(get_db)):
                 """
             )
             requests = cursor.fetchall()
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Lecture des demandes UPB")
-        raise ApiError(500, "Impossible de charger les demandes.")
+        raise _db_failure(error, "Impossible de charger les demandes.")
     for request in requests:
         request["verification_noms"] = _name_check(request)
     return respond(200, {"status": "success", "data": requests})
@@ -244,6 +245,12 @@ def _name_check(request: dict) -> dict | None:
     prenoms = changes.get("prenoms") or request["prenoms"]
     score = name_similarity(str(nom), str(prenoms), request["nom"], request["prenoms"])
     return {"score": score, "niveau": name_level(score)}
+
+
+def _db_failure(error: BaseException, message: str) -> ApiError:
+    """Erreur 500 dont le message dit quoi faire quand la cause est un schéma de base en retard (migration manquante)."""
+    hint = db_schema_hint(error)
+    return ApiError(500, f"{message} {hint}" if hint else message)
 
 
 COMMENT_MAX = 500
@@ -394,9 +401,9 @@ def _decide_modification(db: Database, request_id: int, action: str, comment: st
                     """,
                     (request_id,),
                 )
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Traitement de demande UPB")
-        raise ApiError(500, "Erreur lors du traitement de la demande.")
+        raise _db_failure(error, "Erreur lors du traitement de la demande.")
 
     return {
         "message": "Demande approuvée et informations mises à jour.",
@@ -464,6 +471,38 @@ def _normalize_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", ascii_value.lower()).strip("_")
 
 
+def _birth_compatible(a: str | None, b: str | None) -> bool:
+    """Deux dates connues et différentes désignent deux personnes ; une date inconnue ne contredit rien."""
+    return a is None or b is None or a == b
+
+
+def _load_import_directory(cursor) -> tuple[dict, dict]:
+    """Tous les étudiants, indexés par matricule et par nom (accents, casse et espaces ignorés)."""
+    cursor.execute(
+        """
+        SELECT e.id, e.matricule, e.nom, e.prenoms, e.date_naissance, e.telephone, e.email, e.sexe,
+               e.allergies_affection, f.libelle AS filiere, n.libelle AS niveau
+        FROM etudiant e
+        LEFT JOIN filiere f ON e.filiere_id = f.id
+        LEFT JOIN niveau n ON e.niveau_id = n.id
+        """
+    )
+    by_matricule: dict[str, dict] = {}
+    by_name: dict[tuple, list[dict]] = {}
+    for row in cursor.fetchall():
+        _register_student(by_matricule, by_name, row)
+    return by_matricule, by_name
+
+
+def _register_student(by_matricule: dict, by_name: dict, row: dict) -> None:
+    row["date_naissance"] = str(row["date_naissance"]) if row["date_naissance"] else None
+    if row["matricule"]:
+        by_matricule[row["matricule"]] = row
+    key = name_key(row["nom"], row["prenoms"])
+    if key:
+        by_name.setdefault(key, []).append(row)
+
+
 @router.post(
     "/api/import_etudiants",
     tags=["Administration"],
@@ -473,8 +512,13 @@ def _normalize_header(value: str) -> str:
     "`matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, "
     "`allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel "
     "(format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; "
-    "sinon l'étudiant est créé sans matricule, à renseigner ensuite. Sans matricule, un homonyme exact déjà "
-    "présent (même date de naissance, ou date inconnue) est refusé comme doublon. "
+    "sinon l'étudiant est créé sans matricule, à renseigner ensuite. "
+    "**Un fichier peut être réimporté pour mettre à jour** : une ligne dont le matricule existe déjà met à jour "
+    "cet étudiant (le nom et les prénoms doivent lui ressembler, sinon erreur : matricule attribué à une autre "
+    "personne) ; une ligne sans matricule est rapprochée par nom et prénoms (accents, casse et espaces ignorés ; "
+    "date de naissance si connue des deux côtés) : un seul étudiant correspond -> mise à jour, aucun -> création, "
+    "plusieurs -> erreur (précisez le matricule). Une ligne avec un matricule nouveau complète l'étudiant du même "
+    "nom qui n'a pas encore de matricule. **Une cellule vide conserve la valeur déjà en base.** "
     "Les noms et prénoms n'acceptent que les lettres de l'alphabet français, "
     "espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). "
     "`filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : Licence 1, Licence 2 ou Licence 3 "
@@ -483,7 +527,7 @@ def _normalize_header(value: str) -> str:
     "Tout ou rien : une erreur annule l'import.",
     response_model=None,
     responses={
-        201: {"model": d.ImportResponse, "description": "Étudiants importés."},
+        201: {"model": d.ImportResponse, "description": "Étudiants créés, mis à jour ou inchangés."},
         **d.errors(400, 401, 500, 503),
         422: {"model": d.ImportErrorResponse, "description": "Fichier ou lignes invalides."},
     },
@@ -526,12 +570,15 @@ def import_students(
     seen_matricules: list[str] = []  # ordre d'insertion
     seen_set: set[str] = set()
     reference_cache: dict[str, dict[str, int | None]] = {"filiere": {}, "niveau": {}}
-    imported = 0
+    created = 0
+    updated = 0
+    unchanged = 0
     without_matricule = 0
-    name_index = None  # chargé seulement si une ligne n'a pas de matricule
+    file_names: list[tuple] = []  # (nom normalisé, date) des lignes sans matricule déjà lues dans ce fichier
     try:
         with db.transaction():
             with db.cursor() as cursor:
+                by_matricule, by_name = _load_import_directory(cursor)
                 for row_number, values in enumerate(reader, start=2):
                     if not any(value.strip() for value in values):
                         continue
@@ -584,66 +631,128 @@ def import_students(
                     if sexe and sexe not in ("M", "F"):
                         errors.append(f"Ligne {row_number} : le sexe doit être M ou F.")
                         continue
-                    if matricule:
-                        cursor.execute("SELECT id FROM etudiant WHERE matricule = %s", (matricule,))
-                        if cursor.fetchone() or matricule in seen_set:
-                            errors.append(
-                                f"Ligne {row_number} : matricule déjà présent ou dupliqué "
-                                f"dans le CSV ({matricule})."
-                            )
-                            continue
-                    else:
-                        if name_index is None:
-                            name_index = load_name_index(cursor)
-                        homonym = index_find(name_index, nom, prenoms, birth_date)
-                        if homonym is not False:
-                            errors.append(
-                                f"Ligne {row_number} : doublon, {nom} {prenoms} existe déjà "
-                                f"({'matricule ' + homonym if homonym else 'sans matricule'}). "
-                                "Renseignez un matricule ou une date de naissance différente "
-                                "s'il s'agit d'un homonyme."
-                            )
-                            continue
-
-                    reference_ids = {}
-                    for table, label in (("filiere", filiere), ("niveau", niveau)):
-                        if not label.strip():
-                            reference_ids[table] = None
-                            continue
-                        key = label.strip().lower()
-                        if key not in reference_cache[table]:
-                            reference_cache[table][key] = lookup_reference_id(
-                                cursor, table, label
-                            )
-                        reference_ids[table] = reference_cache[table][key]
-                    cursor.execute(
-                        """
-                        INSERT INTO etudiant
-                            (matricule, nom, prenoms, date_naissance, telephone,
-                             email, sexe, allergies_affection, filiere_id, niveau_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            matricule,
-                            nom,
-                            prenoms,
-                            birth_date,
-                            telephone or None,
-                            email or None,
-                            sexe or None,
-                            allergies or None,
-                            reference_ids["filiere"],
-                            reference_ids["niveau"],
-                        ),
+                    key = name_key(nom, prenoms)
+                    ambiguous = (
+                        f"Ligne {row_number} : {nom} {prenoms} correspond à plusieurs étudiants déjà en base. "
+                        "Renseignez le matricule (ou la date de naissance) pour désigner le bon."
                     )
+                    target = None
+                    by_matricule_match = False
                     if matricule:
-                        seen_matricules.append(matricule)
-                        seen_set.add(matricule)
+                        if matricule in seen_set:
+                            errors.append(f"Ligne {row_number} : matricule dupliqué dans le fichier ({matricule}).")
+                            continue
+                        target = by_matricule.get(matricule)
+                        if target:
+                            by_matricule_match = True
+                            close = name_similarity(nom, prenoms, target["nom"], target["prenoms"])
+                            if name_level(close) == "different":
+                                errors.append(
+                                    f"Ligne {row_number} : le matricule {matricule} appartient à un autre étudiant "
+                                    f"({target['nom']} {target['prenoms']}). Vérifiez le matricule ou le nom."
+                                )
+                                continue
+                        else:
+                            # Matricule nouveau : il complète l'étudiant du même nom qui n'en a pas encore
+                            candidates = [
+                                r for r in by_name.get(key, [])
+                                if not r["matricule"] and _birth_compatible(r["date_naissance"], birth_date)
+                            ]
+                            if len(candidates) > 1:
+                                errors.append(ambiguous)
+                                continue
+                            target = candidates[0] if candidates else None
                     else:
-                        without_matricule += 1
-                    if name_index is not None:
-                        index_add(name_index, nom, prenoms, birth_date, matricule)
-                    imported += 1
+                        if any(k == key and _birth_compatible(b, birth_date) for k, b in file_names):
+                            errors.append(
+                                f"Ligne {row_number} : {nom} {prenoms} est répété dans le fichier sans matricule. "
+                                "Renseignez un matricule ou une date de naissance différente s'il s'agit d'un homonyme."
+                            )
+                            continue
+                        candidates = [r for r in by_name.get(key, []) if _birth_compatible(r["date_naissance"], birth_date)]
+                        if len(candidates) > 1:
+                            errors.append(ambiguous)
+                            continue
+                        target = candidates[0] if candidates else None
+                        file_names.append((key, birth_date))
+
+                    def reference_id(table: str, label: str):
+                        if not label.strip():
+                            return None
+                        cache_key = label.strip().lower()
+                        if cache_key not in reference_cache[table]:
+                            reference_cache[table][cache_key] = lookup_reference_id(cursor, table, label)
+                        return reference_cache[table][cache_key]
+
+                    if target is None:
+                        cursor.execute(
+                            """
+                            INSERT INTO etudiant
+                                (matricule, nom, prenoms, date_naissance, telephone,
+                                 email, sexe, allergies_affection, filiere_id, niveau_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id
+                            """,
+                            (
+                                matricule, nom, prenoms, birth_date, telephone or None, email or None,
+                                sexe or None, allergies or None, reference_id("filiere", filiere),
+                                reference_id("niveau", niveau),
+                            ),
+                        )
+                        _register_student(by_matricule, by_name, {
+                            "id": cursor.fetchone()["id"], "matricule": matricule, "nom": nom, "prenoms": prenoms,
+                            "date_naissance": birth_date, "telephone": telephone or None, "email": email or None,
+                            "sexe": sexe or None, "allergies_affection": allergies or None,
+                            "filiere": filiere or None, "niveau": niveau or None,
+                        })
+                        created += 1
+                        if matricule:
+                            seen_matricules.append(matricule)
+                        else:
+                            without_matricule += 1
+                    else:
+                        # Mise à jour : une cellule vide conserve la valeur en base. Le nom n'est réécrit que si la
+                        # ligne a été reconnue par son matricule (correction d'orthographe) ; rapprochée par son nom,
+                        # il est déjà le bon.
+                        wanted = {
+                            "date_naissance": birth_date, "telephone": telephone or None, "email": email or None,
+                            "sexe": sexe or None, "allergies_affection": allergies or None,
+                            "filiere": filiere or None, "niveau": niveau or None,
+                        }
+                        if by_matricule_match:
+                            wanted.update({"nom": nom, "prenoms": prenoms})
+                        if matricule and not target["matricule"]:
+                            wanted["matricule"] = matricule
+                        changes = {k: v for k, v in wanted.items() if v is not None and target.get(k) != v}
+                        if changes:
+                            assignments, params = [], []
+                            for field, value in changes.items():
+                                if field in ("filiere", "niveau"):
+                                    assignments.append(f"{field}_id = %s")
+                                    params.append(reference_id(field, value))
+                                else:
+                                    assignments.append(f"{field} = %s")
+                                    params.append(value)
+                            cursor.execute(
+                                f"UPDATE etudiant SET {', '.join(assignments)} WHERE id = %s", (*params, target["id"])
+                            )
+                            old_key = name_key(target["nom"], target["prenoms"])
+                            target.update(changes)
+                            if "matricule" in changes:
+                                by_matricule[matricule] = target
+                            new_key = name_key(target["nom"], target["prenoms"])
+                            if new_key != old_key:
+                                if old_key in by_name and target in by_name[old_key]:
+                                    by_name[old_key].remove(target)
+                                if new_key:
+                                    by_name.setdefault(new_key, []).append(target)
+                            updated += 1
+                            if matricule:
+                                seen_matricules.append(matricule)
+                        else:
+                            unchanged += 1
+                    if matricule:
+                        seen_set.add(matricule)
 
                 # Lever une exception ici annule toute la transaction (aucune ligne importée).
                 if errors:
@@ -652,7 +761,7 @@ def import_students(
                         "Aucune ligne importée : corrigez les erreurs puis réessayez.",
                         errors=errors[:50],
                     )
-                if imported == 0:
+                if created + updated + unchanged == 0:
                     raise ApiError(422, "Le fichier ne contient aucun étudiant à importer.")
     except psycopg.Error as error:
         logger.exception("Import CSV UPB")
@@ -661,14 +770,23 @@ def import_students(
             "Erreur lors de l'import. " + (db_schema_hint(error) or "Vérifiez le format CSV et réessayez."),
         )
 
-    audit.annotate(importes=imported, sans_matricule=without_matricule)
+    audit.annotate(importes=created, mis_a_jour=updated, inchanges=unchanged, sans_matricule=without_matricule)
+    parts = []
+    if created:
+        parts.append(f"{created} créé(s)")
+    if updated:
+        parts.append(f"{updated} mis à jour")
+    if unchanged:
+        parts.append(f"{unchanged} inchangé(s)")
     return respond(
         201,
         {
             "status": "success",
-            "message": f"{imported} étudiant(s) importé(s) avec succès."
-            + (f" {without_matricule} sans matricule : à renseigner ensuite." if without_matricule else ""),
-            "imported": imported,
+            "message": "Import terminé : " + ", ".join(parts) + "."
+            + (f" {without_matricule} créé(s) sans matricule : à renseigner ensuite." if without_matricule else ""),
+            "imported": created,
+            "updated": updated,
+            "unchanged": unchanged,
             "sans_matricule": without_matricule,
             "matricules": seen_matricules,
         },
@@ -695,9 +813,9 @@ def list_creations(db: Database = Depends(get_db)):
             )
             requests = cursor.fetchall()
             known = load_students_for_matching(cursor) if requests else []
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Lecture des demandes de création UPB")
-        raise ApiError(500, "Impossible de charger les demandes.")
+        raise _db_failure(error, "Impossible de charger les demandes.")
     for request in requests:
         request["correspondance"] = _creation_match(known, request.get("donnees"))
     return respond(200, {"status": "success", "data": requests})
@@ -825,9 +943,9 @@ def _decide_creation(db: Database, request_id: int, action: str, comment: str | 
                     """,
                     (student_id, request_id),
                 )
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Traitement de demande de création UPB")
-        raise ApiError(500, "Erreur lors du traitement de la demande.")
+        raise _db_failure(error, "Erreur lors du traitement de la demande.")
 
     return {
         "message": (
@@ -1024,9 +1142,9 @@ def create_student(body: Any = Depends(json_body), db: Database = Depends(get_db
                 created = cursor.fetchone()
     except psycopg.errors.UniqueViolation:
         raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Création d'un étudiant UPB")
-        raise ApiError(500, "Impossible de créer l'étudiant.")
+        raise _db_failure(error, "Impossible de créer l'étudiant.")
     audit.annotate(target=str(student_id), target_type="etudiant", matricule=matricule)
     return respond(201, {"status": "success", "message": "Étudiant créé.", "data": created})
 
@@ -1056,9 +1174,9 @@ def unregister_student(body: Any = Depends(json_body), db: Database = Depends(ge
                 removed = cursor.fetchall()
                 if not removed:
                     raise ApiError(404, "Cet étudiant n'est pas inscrit au concours.")
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Désinscription UPB")
-        raise ApiError(500, "Impossible de désinscrire l'étudiant.")
+        raise _db_failure(error, "Impossible de désinscrire l'étudiant.")
     audit.annotate(numero_candidat=removed[0]["numero_candidat"])
     return respond(200, {"status": "success", "message": "Étudiant désinscrit du concours."})
 
@@ -1091,9 +1209,9 @@ def delete_student(body: Any = Depends(json_body), db: Database = Depends(get_db
                 cursor.execute("SELECT numero_candidat FROM candidat_concours WHERE etudiant_id = %s", (student_id,))
                 candidate = cursor.fetchone()
                 cursor.execute("DELETE FROM etudiant WHERE id = %s", (student_id,))
-    except psycopg.Error:
+    except psycopg.Error as error:
         logger.exception("Suppression d'un étudiant UPB")
-        raise ApiError(500, "Impossible de supprimer l'étudiant.")
+        raise _db_failure(error, "Impossible de supprimer l'étudiant.")
     audit.annotate(
         matricule=student["matricule"],
         etait_inscrit=bool(candidate),

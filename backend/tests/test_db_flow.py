@@ -65,10 +65,10 @@ def test_full_flow(client):
     response = import_csv(client)
     assert response.status_code == 201, response.text
     assert response.json()["matricules"] == [MATRICULE_ALICE, MATRICULE_BOB]
-    # Doublon : refusé
+    # Réimport du même fichier : aucune erreur, rien de créé, rien à mettre à jour
     response = import_csv(client)
-    assert response.status_code == 422
-    assert "matricule déjà présent" in response.json()["errors"][0]
+    assert response.status_code == 201, response.text
+    assert (response.json()["imported"], response.json()["updated"], response.json()["unchanged"]) == (0, 0, 2)
 
     # --- Vérification publique ---
     response = client.post("/api/verifier", json={"matricule": MATRICULE_ALICE.lower()})

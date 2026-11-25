@@ -1,9 +1,50 @@
-...............................                                          [100%]
+........................................................................ [ 36%]
+......................................F................................. [ 73%]
+...................................................                      [100%]
+================================== FAILURES ===================================
+_______________________ test_create_student_duplicates ________________________
+
+client = <starlette.testclient.TestClient object at 0x000002AD743618C0>
+
+    def test_create_student_duplicates(client):
+        assert create(client, matricule="ZZTA1703980001").status_code == 201
+        response = create(client, prenoms="Autre", matricule="zzta1703980001")
+        assert response.status_code == 409 and "matricule existe déjà" in response.json()["message"]
+        # Sans matricule : un homonyme exact de l'étudiant existant (accents/casse ignorés) est refusé
+        response = client.post("/api/admin_etudiants", json={"nom": "ZZTEST", "prenoms": "alice"})
+        assert response.status_code == 409 and "Doublon" in response.json()["message"] and "ZZTA1703980001" in response.json()["message"]
+        # Avec un autre matricule : c'est une autre personne
+>       assert create(client, matricule="ZZTA0205990001").status_code == 201
+E       AssertionError: assert 500 == 201
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+E        +    where <Response [500 Internal Server Error]> = create(<starlette.testclient.TestClient object at 0x000002AD743618C0>, matricule='ZZTA0205990001')
+
+tests\test_admin_students.py:88: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.routes.admin:admin.py:1146 Création d'un étudiant UPB
+Traceback (most recent call last):
+  File "D:\projet-dev\bd-incub\backend\app\routes\admin.py", line 1141, in create_student
+    cursor.execute(STUDENT_SELECT + " WHERE e.id = %s", (student_id,))
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\projet-dev\bd-incub\backend\.venv\Lib\site-packages\psycopg\cursor.py", line 117, in execute
+    raise ex.with_traceback(None)
+psycopg.OperationalError: consuming input failed: server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+WARNING  psycopg.pool:pool.py:730 discarding closed connection: <psycopg.Connection [BAD] at 0x2ad7449a7a0>
+---------------------------- Captured log teardown ----------------------------
+WARNING  psycopg.pool:_acompat.py:163 couldn't stop thread 'pool-119-scheduler' within 5.0 seconds
+WARNING  psycopg.pool:_acompat.py:163 couldn't stop thread 'pool-120-scheduler' within 5.0 seconds
 ============================== warnings summary ===============================
 .venv\Lib\site-packages\fastapi\testclient.py:1
   D:\projet-dev\bd-incub\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-31 passed, 1 warning in 161.32s (0:02:41)
+=========================== short test summary info ===========================
+FAILED tests/test_admin_students.py::test_create_student_duplicates - Asserti...
+1 failed, 194 passed, 1 warning in 1872.48s (0:31:12)
 finished

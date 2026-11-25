@@ -246,9 +246,11 @@ class ModificationDecisionResponse(SuccessResponse):
 
 
 class ImportResponse(SuccessResponse):
-    imported: int
+    imported: int = Field(description="Étudiants créés.")
+    updated: int = Field(description="Étudiants existants mis à jour (cellules vides : valeur en base conservée).")
+    unchanged: int = Field(description="Lignes correspondant à un étudiant déjà identique en base.")
     sans_matricule: int = Field(description="Étudiants créés sans matricule (à renseigner ensuite).")
-    matricules: list[str] = Field(description="Matricules importés (les étudiants sans matricule n'y figurent pas).")
+    matricules: list[str] = Field(description="Matricules des étudiants créés ou mis à jour (ceux sans matricule n'y figurent pas).")
 
 
 class AttendanceRow(BaseModel):

@@ -2344,7 +2344,7 @@
           "Administration"
         ],
         "summary": "Importer des étudiants depuis un CSV",
-        "description": "Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, séparateur `,` ou `;`). **Seules les colonnes `nom` et `prenoms` sont obligatoires.** Facultatives : `matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, `allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel (format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; sinon l'étudiant est créé sans matricule, à renseigner ensuite. Sans matricule, un homonyme exact déjà présent (même date de naissance, ou date inconnue) est refusé comme doublon. Les noms et prénoms n'acceptent que les lettres de l'alphabet français, espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). `filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : Licence 1, Licence 2 ou Licence 3 (casse et espaces ignorés) ; toute autre valeur est une erreur de ligne. Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). Tout ou rien : une erreur annule l'import.",
+        "description": "Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, séparateur `,` ou `;`). **Seules les colonnes `nom` et `prenoms` sont obligatoires.** Facultatives : `matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, `allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel (format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; sinon l'étudiant est créé sans matricule, à renseigner ensuite. **Un fichier peut être réimporté pour mettre à jour** : une ligne dont le matricule existe déjà met à jour cet étudiant (le nom et les prénoms doivent lui ressembler, sinon erreur : matricule attribué à une autre personne) ; une ligne sans matricule est rapprochée par nom et prénoms (accents, casse et espaces ignorés ; date de naissance si connue des deux côtés) : un seul étudiant correspond -> mise à jour, aucun -> création, plusieurs -> erreur (précisez le matricule). Une ligne avec un matricule nouveau complète l'étudiant du même nom qui n'a pas encore de matricule. **Une cellule vide conserve la valeur déjà en base.** Les noms et prénoms n'acceptent que les lettres de l'alphabet français, espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). `filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : Licence 1, Licence 2 ou Licence 3 (casse et espaces ignorés) ; toute autre valeur est une erreur de ligne. Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). Tout ou rien : une erreur annule l'import.",
         "operationId": "import_students_api_import_etudiants_post",
         "requestBody": {
           "content": {
@@ -2365,7 +2365,7 @@
             }
           },
           "201": {
-            "description": "Étudiants importés.",
+            "description": "Étudiants créés, mis à jour ou inchangés.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4506,7 +4506,18 @@
           },
           "imported": {
             "type": "integer",
-            "title": "Imported"
+            "title": "Imported",
+            "description": "Étudiants créés."
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated",
+            "description": "Étudiants existants mis à jour (cellules vides : valeur en base conservée)."
+          },
+          "unchanged": {
+            "type": "integer",
+            "title": "Unchanged",
+            "description": "Lignes correspondant à un étudiant déjà identique en base."
           },
           "sans_matricule": {
             "type": "integer",
@@ -4519,13 +4530,15 @@
             },
             "type": "array",
             "title": "Matricules",
-            "description": "Matricules importés (les étudiants sans matricule n'y figurent pas)."
+            "description": "Matricules des étudiants créés ou mis à jour (ceux sans matricule n'y figurent pas)."
           }
         },
         "type": "object",
         "required": [
           "message",
           "imported",
+          "updated",
+          "unchanged",
           "sans_matricule",
           "matricules"
         ],

@@ -41,6 +41,7 @@ ROUTE_EVENTS: dict[tuple[str, str], tuple[str, str, str, bool]] = {
     ("POST", "/api/partenaire/inscrire"): ("INSCRIPTION_CONCOURS", "INSCRIPTION", "PARTENAIRE", False),
     ("POST", "/api/admin_etudiants"): ("ETUDIANT_CREE", "ETUDIANT", "ADMIN", False),
     ("POST", "/api/admin_desinscrire"): ("ETUDIANT_DESINSCRIT", "INSCRIPTION", "ADMIN", False),
+    ("POST", "/api/admin_supprimer_etudiant"): ("ETUDIANT_SUPPRIME", "ETUDIANT", "ADMIN", False),
     ("POST", "/api/update_etudiant"): ("ETUDIANT_MODIFIE", "ETUDIANT", "ADMIN", False),
     ("POST", "/api/update_telephone"): ("ETUDIANT_TELEPHONE_MODIFIE", "ETUDIANT", "ADMIN", False),
     ("POST", "/api/admin_modifications"): ("DEMANDE_CORRECTION_TRAITEE", "DEMANDE", "ADMIN", False),

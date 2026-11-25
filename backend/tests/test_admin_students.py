@@ -33,6 +33,7 @@ def test_admin_routes_need_authentication(client):
     with TestClient(create_app()) as anonymous:
         assert anonymous.post("/api/admin_etudiants", json={"nom": "Zztest", "prenoms": "Alice"}).status_code == 401
         assert anonymous.post("/api/admin_desinscrire", json={"id": 1}).status_code == 401
+        assert anonymous.post("/api/admin_supprimer_etudiant", json={"id": 1}).status_code == 401
         assert anonymous.post("/api/update_etudiant", json={"id": 1, "nom": "Zztest"}).status_code == 401
 
 
@@ -211,7 +212,13 @@ def test_student_administration_is_traced(client, monkeypatch):
         assert client.post("/api/update_etudiant", json={"id": row["id"], "telephone": "0707070707", "nom": "Zztesu"}).status_code == 200
         register_directly("ZZTA1703980001")
         assert client.post("/api/admin_desinscrire", json={"id": row["id"]}).status_code == 200
+        register_directly("ZZTA1703980001", "ZZT-CAND-2")
+        assert client.post("/api/pointage", json={"matricule": "ZZTA1703980001", "date": "2026-06-10"}).status_code == 201
+        assert client.post("/api/admin_supprimer_etudiant", json={"id": row["id"]}).status_code == 200
         found = {e["action"]: e for e in events()}
+        assert found["ETUDIANT_SUPPRIME"]["details"]["matricule"] == "ZZTA1703980001"
+        assert found["ETUDIANT_SUPPRIME"]["details"]["pointages_supprimes"] == 1
+        assert found["ETUDIANT_SUPPRIME"]["details"]["numero_candidat"] == "ZZT-CAND-2"
         assert found["ETUDIANT_CREE"]["statut"] == "SUCCES" and found["ETUDIANT_CREE"]["acteur"] == "ZZTadmin"
         assert found["ETUDIANT_MODIFIE"]["details"]["champs"] == ["nom", "telephone"]
         assert found["ETUDIANT_DESINSCRIT"]["details"]["numero_candidat"] == "ZZT-CAND-1"
@@ -219,3 +226,33 @@ def test_student_administration_is_traced(client, monkeypatch):
         assert "secret@exemple.ci" not in blob and "0707070707" not in blob  # pas de valeurs personnelles
     finally:
         purge()
+
+
+# ------------------------------------------------------------------ suppression définitive
+def test_delete_student_removes_the_record_and_its_dependencies(client):
+    assert import_csv(client).status_code == 201
+    register_directly("ZZTA1703980001")
+    alice = [r for r in listing(client)["data"] if r["matricule"] == "ZZTA1703980001"][0]
+    bob = [r for r in listing(client)["data"] if r["matricule"] == "ZZTB0205990001"][0]
+    assert client.post("/api/pointage", json={"matricule": "ZZTA1703980001", "date": "2026-06-10"}).status_code == 201
+    assert client.post("/api/demander_modification", json={"matricule": "ZZTA1703980001", "email": "a@exemple.ci"}).status_code == 201
+
+    response = client.post("/api/admin_supprimer_etudiant", json={"id": alice["id"]})
+    assert response.status_code == 200 and response.json()["message"] == "Étudiant supprimé définitivement."
+    assert [r["matricule"] for r in listing(client)["data"]] == ["ZZTB0205990001"]  # Bob intact
+    assert client.post("/api/verifier", json={"matricule": "ZZTA1703980001"}).status_code == 404
+    assert client.get("/api/pointage", params={"date": "2026-06-10"}).json()["data"] == []
+    assert not [r for r in client.get("/api/admin_modifications").json()["data"] if r["matricule"] == "ZZTA1703980001"]
+    # Introuvable / identifiant invalide
+    assert client.post("/api/admin_supprimer_etudiant", json={"id": alice["id"]}).status_code == 404
+    assert client.post("/api/admin_supprimer_etudiant", json={"id": 0}).status_code == 400
+    assert client.post("/api/admin_supprimer_etudiant", json={}).status_code == 400
+    # Un étudiant sans inscription ni historique se supprime aussi ; le matricule est de nouveau libre
+    assert client.post("/api/admin_supprimer_etudiant", json={"id": bob["id"]}).status_code == 200
+    assert create(client, matricule="ZZTA1703980001").status_code == 201
+
+
+def test_admin_page_offers_the_delete_button():
+    from pathlib import Path
+    page = (Path(__file__).resolve().parents[2] / "frontend" / "admin.html").read_text(encoding="utf-8")
+    assert "supprimerEtudiant(${e.id})" in page and "/api/admin_supprimer_etudiant" in page

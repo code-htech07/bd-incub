@@ -215,6 +215,11 @@ class PendingModification(BaseModel):
     nom: str
     prenoms: str
     date_naissance: str | None
+    verification_noms: dict[str, Any] | None = Field(
+        default=None,
+        description="Présent si la correction touche au nom ou aux prénoms : `score` (0 à 1) et `niveau` "
+        "(`identique`, `proche` = faute légère tolérée, `different`) par rapport aux noms déjà en base.",
+    )
 
 
 class ModificationsListResponse(BaseModel):
@@ -222,8 +227,17 @@ class ModificationsListResponse(BaseModel):
     data: list[PendingModification]
 
 
+MAIL_STATE = Field(
+    default=None,
+    description="État de l'e-mail envoyé à l'étudiant : `envoye`, `echec` (voir `mail_erreur`), `sans_email` "
+    "(aucune adresse connue) ou `non_configure` (clé Resend absente ou envois coupés).",
+)
+
+
 class ModificationDecisionResponse(SuccessResponse):
     matricule: str | None = Field(default=None, description="Présent uniquement après approbation.")
+    mail: Literal["envoye", "echec", "sans_email", "non_configure"] | None = MAIL_STATE
+    mail_erreur: str | None = Field(default=None, description="Motif de l'échec d'envoi, si `mail` vaut `echec`.")
 
 
 class ImportResponse(SuccessResponse):
@@ -296,6 +310,12 @@ class PendingCreation(BaseModel):
     matricule_saisi: str
     donnees: dict[str, Any]
     created_at: str = Field(examples=["2026-06-01 09:30:00"])
+    correspondance: dict[str, Any] | None = Field(
+        default=None,
+        description="Dossier déjà en base dont le nom ressemble (fautes légères tolérées) : `etudiant_id`, "
+        "`matricule`, `nom`, `prenoms`, `score`, `niveau`, `a_completer` (vrai si le dossier n'a pas encore de "
+        "matricule : l'approbation le complète au lieu de créer un doublon). `null` : nom absent de la base.",
+    )
 
 
 class CreationsListResponse(BaseModel):
@@ -305,6 +325,9 @@ class CreationsListResponse(BaseModel):
 
 class CreationDecisionResponse(SuccessResponse):
     matricule: str | None = Field(default=None, description="Matricule du dossier créé (après approbation).")
+    fusion: bool | None = Field(default=None, description="Vrai si un dossier existant sans matricule a été complété.")
+    mail: Literal["envoye", "echec", "sans_email", "non_configure"] | None = MAIL_STATE
+    mail_erreur: str | None = Field(default=None, description="Motif de l'échec d'envoi, si `mail` vaut `echec`.")
 
 
 class LoginBody(BaseModel):

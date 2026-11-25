@@ -487,3 +487,38 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   Modèle d'import et aide de l'import mis à jour avec les valeurs de la liste.
 - Tests : `tests/test_referentiels.py` (règles, route, pages et composant, modèle, import, flux candidat et admin,
   valeurs historiques). **À faire côté déploiement** : redéployer le backend (Render) et le frontend (Netlify).
+
+## Étape 20 — Suppression d'un étudiant, comparaison des noms, e-mails de décision
+
+- **Suppression définitive** : `POST /api/admin_supprimer_etudiant` (`{id}`) et bouton « Supprimer » dans la liste des
+  étudiants (confirmation). Efface le dossier et ses dépendances (inscription au concours, pointages, demandes de
+  correction, par `ON DELETE CASCADE` ; les demandes d'ajout déjà traitées sont conservées, sans lien). `404` si
+  introuvable. Journal : `ETUDIANT_SUPPRIME` (matricule, était inscrit, nombre de pointages supprimés ; jamais de données
+  personnelles). Distinct de « Désinscrire », qui garde le dossier.
+- **Comparaison des noms** (`student_rules.py`) : les noms et prénoms sont déjà en base pour tous les étudiants. Une
+  demande est comparée à ces noms (accents, casse, tirets ignorés ; ordre et nombre de prénoms indifférents ; score de
+  ressemblance, seuil de tolérance 0,80 : une faute légère est « proche », pas « différent »).
+  - *Demande d'ajout de dossier* : la liste admin indique la `correspondance` trouvée. Si un dossier **sans matricule**
+    porte ce nom (faute légère tolérée), l'approbation **complète ce dossier** (matricule, nom et prénoms saisis fusionnés,
+    autres champs renseignés seulement s'ils sont fournis) au lieu de créer un doublon (`fusion: true`). Un homonyme
+    déjà pourvu d'un matricule n'est jamais écrasé : l'admin est averti (faute possible dans le matricule) et l'approbation
+    crée un nouveau dossier. Aucun nom retrouvé : avertissement, création d'un nouveau dossier.
+  - *Demande de correction touchant au nom ou aux prénoms* : `verification_noms` (`score`, `niveau`) ; avertissement si
+    le nom proposé ne ressemble pas à celui en base.
+  - Pages : encadré vert/orange sous chaque demande.
+- **E-mails de décision via Resend** (`app/mailer.py`) : approbation ou refus (demande d'ajout ou de correction, y compris
+  « Tout approuver ») envoie un e-mail à l'étudiant (adresse de la demande, sinon celle du dossier). Expéditeur affiché :
+  « INCUBATEUR UPB <noreply@synapstic.tech> » (`UPB_MAIL_NAME`, `UPB_MAIL_FROM`) ; ni Cc, ni Cci, ni Reply-To : aucune autre
+  adresse n'est visible. Une décision unique attend le résultat de l'envoi : `mail` vaut `envoye`, `echec` (avec
+  `mail_erreur`, ex. domaine non vérifié), `sans_email` ou `non_configure`, et la notification de la page l'affiche.
+  « Tout approuver » envoie en arrière-plan (`mis_en_file`) et un échec est écrit dans le journal (`EMAIL_ECHEC`). Un échec
+  ne bloque jamais la décision. Variables : `RESEND_API_KEY`, `UPB_MAIL_FROM`, `UPB_MAIL_NAME`, `UPB_MAIL_ENABLED`.
+  Message mis en forme aux couleurs du site (en-tête bleu marine et liseré or, logo, pastille « Approuvé » / « Non retenu »,
+  bloc matricule, pied de page), compatible messageries (tableaux, styles en ligne, texte brut joint). Le logo doit être
+  une image hébergée en https : `UPB_MAIL_LOGO_URL`, sinon `logo-upb.png` du premier site de `UPB_CORS_ORIGINS` ; sans
+  adresse, l'en-tête n'a que le nom.
+  Vérifier la configuration : `python scripts/test_mail.py adresse@exemple.ci` (depuis `backend/`). **À faire** : créer la
+  clé Resend, vérifier
+  le domaine `synapstic.tech` (SPF/DKIM) et ajouter `RESEND_API_KEY` sur Render.
+- Tests : `tests/test_mail_and_names.py` (ressemblance, fusion, homonymes, e-mails simulés, confidentialité de
+  l'expéditeur, panne Resend) et suppression dans `tests/test_admin_students.py`. Les tests n'envoient jamais d'e-mail réel.

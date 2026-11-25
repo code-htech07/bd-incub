@@ -406,6 +406,9 @@
         .request-head .mat{font:600 .78rem ui-monospace,Consolas,monospace;color:var(--mut);overflow-wrap:anywhere}
         .request-date{font-size:.78rem;font-weight:600;color:var(--mut);background:#fff;border:1px solid #dce5f5;
             border-radius:99px;padding:5px 12px;white-space:nowrap}
+        .name-check{margin:10px 0 0;padding:9px 13px;border-radius:12px;font-size:.84rem;line-height:1.45;border:1px solid transparent}
+        .name-check.ok{background:rgba(34,139,94,.1);border-color:rgba(34,139,94,.35)}
+        .name-check.warn{background:rgba(217,119,6,.1);border-color:rgba(217,119,6,.4)}
         .request-changes{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px 12px;margin:0}
         .request-changes > div{min-width:0;background:#fff;border:1px solid #e1e9f6;border-radius:12px;padding:10px 14px}
         .request-changes dt{margin-bottom:4px;font:700 .68rem var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
@@ -1468,6 +1471,7 @@
                             <button class="save" id="btn-${e.id}" type="button" onclick="enregistrerContact(${e.id})">Enregistrer</button>
                             <button class="row-btn" type="button" onclick="ouvrirEtudiant(${e.id})" title="Modifier tous les champs">Modifier</button>
                             ${e.numero_candidat ? `<button class="row-btn danger" type="button" onclick="desinscrireEtudiant(${e.id})" title="Retirer l’inscription au concours">Désinscrire</button>` : ''}
+                            <button class="row-btn danger" type="button" onclick="supprimerEtudiant(${e.id})" title="Supprimer définitivement ce dossier">Supprimer</button>
                         </div>
                     </td>
                 </tr>`;
@@ -2630,6 +2634,30 @@
                 `<div><dt>${esc(DEMANDE_LABELS[key] || key)}</dt>${valeurDemande(key, value)}</div>`).join('')}</dl>`;
         }
 
+        function noteNoms(request, creation) {
+            const pourcent = score => Math.round(Number(score || 0) * 100) + ' %';
+            if (creation) {
+                const c = request.correspondance;
+                if (!c) return '<p class="name-check warn">Aucun étudiant de ce nom n’est en base : l’approbation créera un nouveau dossier.</p>';
+                const qui = `${esc(c.nom)} ${esc(c.prenoms)}`;
+                if (c.a_completer) {
+                    return `<p class="name-check ok">Nom ${c.niveau === 'identique' ? 'retrouvé' : 'proche retrouvé (' + pourcent(c.score) + ')'} en base : <b>${qui}</b>, sans matricule. L’approbation complétera ce dossier (nom et prénoms saisis fusionnés) au lieu d’en créer un nouveau.</p>`;
+                }
+                return `<p class="name-check warn">Un étudiant de nom ${c.niveau === 'identique' ? 'identique' : 'proche (' + pourcent(c.score) + ')'} existe déjà avec le matricule <b>${esc(c.matricule)}</b> (${qui}) : vérifiez une faute de saisie du matricule avant d’approuver.</p>`;
+            }
+            const v = request.verification_noms;
+            if (!v) return '';
+            if (v.niveau === 'different') return `<p class="name-check warn">Le nom proposé ne ressemble pas à celui en base (${pourcent(v.score)}) : vérifiez avant d’approuver.</p>`;
+            return `<p class="name-check ok">Nom proposé ${v.niveau === 'identique' ? 'identique à' : 'proche de (' + pourcent(v.score) + ')'} celui en base : simple correction.</p>`;
+        }
+
+        function texteMail(data) {
+            return data.mail === 'envoye' ? ' E-mail envoyé à l’étudiant.'
+                : data.mail === 'echec' ? ` E-mail NON envoyé (${data.mail_erreur || 'erreur'}).`
+                : data.mail === 'sans_email' ? ' Aucune adresse e-mail connue : étudiant non prévenu.'
+                : data.mail === 'non_configure' ? ' E-mail non configuré : étudiant non prévenu.' : '';
+        }
+
         function majResumeDemandes() {
             const total = demandesEnAttente.mods + demandesEnAttente.creas;
             $('count-mods').textContent = demandesEnAttente.mods;
@@ -2663,6 +2691,7 @@
                             <time class="request-date">Reçue le ${esc(dateDemande(request.created_at))}</time>
                         </header>
                         ${champsDemande(request.modifications)}
+                        ${noteNoms(request, false)}
                         <div class="request-actions">
                             <button class="admin-action" type="button" onclick="traiterDemande(${Number(request.id)}, 'approve')">Approuver</button>
                             <button class="admin-action reject" type="button" onclick="traiterDemande(${Number(request.id)}, 'reject')">Refuser</button>
@@ -2684,7 +2713,7 @@
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Traitement impossible.');
-                toast(data.message + (data.matricule ? ` Nouveau matricule : ${data.matricule}` : ''), 'success');
+                toast(data.message + texteMail(data), 'success');
                 await chargerDemandes();
                 if (action === 'approve') await chargerEtudiants();
             } catch (exception) {
@@ -2714,6 +2743,7 @@
                             <time class="request-date">Reçue le ${esc(dateDemande(request.created_at))}</time>
                         </header>
                         ${champsDemande(request.donnees)}
+                        ${noteNoms(request, true)}
                         <div class="request-actions">
                             <button class="admin-action" type="button" onclick="traiterCreation(${Number(request.id)}, 'approve')">Approuver et créer le dossier</button>
                             <button class="admin-action reject" type="button" onclick="traiterCreation(${Number(request.id)}, 'reject')">Refuser</button>
@@ -2735,7 +2765,7 @@
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Traitement impossible.');
-                toast(data.message + (data.matricule ? ` Matricule : ${data.matricule}` : ''), 'success');
+                toast(data.message + (data.matricule ? ` Matricule : ${data.matricule}.` : '') + texteMail(data), 'success');
                 await chargerCreations();
                 if (action === 'approve') await chargerEtudiants();
             } catch (exception) {
@@ -2805,7 +2835,7 @@
             PARTENAIRE_MODIFIE: 'Intégration modifiée', PARTENAIRE_ACTIVE: 'Intégration activée',
             PARTENAIRE_DESACTIVE: 'Intégration désactivée', PARTENAIRE_CLE_GENEREE: 'Clé d’API générée',
             PARTENAIRE_CLE_REVOQUEE: 'Clé d’API révoquée', PARTENAIRE_SUPPRIME: 'Intégration supprimée',
-            ETUDIANT_CREE: 'Étudiant créé', ETUDIANT_DESINSCRIT: 'Étudiant désinscrit du concours'
+            ETUDIANT_CREE: 'Étudiant créé', ETUDIANT_DESINSCRIT: 'Étudiant désinscrit du concours', ETUDIANT_SUPPRIME: 'Étudiant supprimé', EMAIL_ECHEC: 'E-mail non envoyé'
         };
         const JOURNAL_CATEGORIES = {
             AUTH: 'Authentification', ETUDIANT: 'Étudiants', DEMANDE: 'Demandes', INSCRIPTION: 'Inscriptions',
@@ -3371,6 +3401,23 @@
             }
         }
 
+        async function supprimerEtudiant(id) {
+            const e = etudiants.find(x => String(x.id) === String(id));
+            if (!e) return;
+            const nom = `${e.nom} ${e.prenoms}`;
+            const suite = e.numero_candidat ? `
+Il est inscrit au concours (${e.numero_candidat}) : l’inscription sera supprimée aussi.` : '';
+            if (!confirm(`Supprimer définitivement ${nom} ?${suite}
+Son dossier, son historique de pointage et ses demandes de correction seront effacés. Cette action est irréversible.`)) return;
+            try {
+                const data = await envoyerAdmin('/api/admin_supprimer_etudiant', { id: e.id });
+                toast(data.message, 'success');
+                await chargerEtudiants();
+            } catch (exception) {
+                toast(exception.message, 'error');
+            }
+        }
+        window.supprimerEtudiant = supprimerEtudiant;
         window.ouvrirEtudiant = ouvrirEtudiant;
         window.desinscrireEtudiant = desinscrireEtudiant;
         $('btnNewStudent').addEventListener('click', () => ouvrirEtudiant(null));

@@ -2955,6 +2955,106 @@
         ]
       }
     },
+    "/api/admin_supprimer_etudiant": {
+      "post": {
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Supprimer définitivement un étudiant",
+        "description": "Supprime le dossier de l'étudiant **et** ce qui en dépend : inscription au concours, historique de pointage et demandes de correction. Les demandes d'ajout de dossier déjà traitées sont conservées (sans lien). Irréversible. L'événement est tracé dans le journal (matricule et volumes, jamais les données personnelles).",
+        "operationId": "delete_student_api_admin_supprimer_etudiant_post",
+        "requestBody": {
+          "description": "Identifiant de l'étudiant.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1.0,
+                    "title": "Id",
+                    "description": "Identifiant interne de l'étudiant (champ `id` de `get_etudiants`)."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "title": "UnregisterBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Requête invalide (champ manquant, date mal formée…).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Jeton administrateur absent ou invalide.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ressource introuvable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur serveur ou base de données.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Jeton administrateur non configuré côté serveur.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearer": []
+          }
+        ]
+      }
+    },
     "/api/admin_journal": {
       "get": {
         "tags": [
@@ -4211,6 +4311,48 @@
             ],
             "title": "Matricule",
             "description": "Matricule du dossier créé (après approbation)."
+          },
+          "fusion": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fusion",
+            "description": "Vrai si un dossier existant sans matricule a été complété."
+          },
+          "mail": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "envoye",
+                  "echec",
+                  "sans_email",
+                  "non_configure"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail",
+            "description": "État de l'e-mail envoyé à l'étudiant : `envoye`, `echec` (voir `mail_erreur`), `sans_email` (aucune adresse connue) ou `non_configure` (clé Resend absente ou envois coupés)."
+          },
+          "mail_erreur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Erreur",
+            "description": "Motif de l'échec d'envoi, si `mail` vaut `echec`."
           }
         },
         "type": "object",
@@ -4719,6 +4861,36 @@
             ],
             "title": "Matricule",
             "description": "Présent uniquement après approbation."
+          },
+          "mail": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "envoye",
+                  "echec",
+                  "sans_email",
+                  "non_configure"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail",
+            "description": "État de l'e-mail envoyé à l'étudiant : `envoye`, `echec` (voir `mail_erreur`), `sans_email` (aucune adresse connue) ou `non_configure` (clé Resend absente ou envois coupés)."
+          },
+          "mail_erreur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Erreur",
+            "description": "Motif de l'échec d'envoi, si `mail` vaut `echec`."
           }
         },
         "type": "object",
@@ -5374,6 +5546,19 @@
             "examples": [
               "2026-06-01 09:30:00"
             ]
+          },
+          "correspondance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correspondance",
+            "description": "Dossier déjà en base dont le nom ressemble (fautes légères tolérées) : `etudiant_id`, `matricule`, `nom`, `prenoms`, `score`, `niveau`, `a_completer` (vrai si le dossier n'a pas encore de matricule : l'approbation le complète au lieu de créer un doublon). `null` : nom absent de la base."
           }
         },
         "type": "object",
@@ -5434,6 +5619,19 @@
               }
             ],
             "title": "Date Naissance"
+          },
+          "verification_noms": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification Noms",
+            "description": "Présent si la correction touche au nom ou aux prénoms : `score` (0 à 1) et `niveau` (`identique`, `proche` = faute légère tolérée, `different`) par rapport aux noms déjà en base."
           }
         },
         "type": "object",

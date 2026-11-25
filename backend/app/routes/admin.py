@@ -11,7 +11,7 @@ import psycopg
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from .. import config
-from .. import audit
+from .. import audit, mailer
 from ..auth import require_admin
 from ..db import Database, get_db
 from ..db import schema_hint as db_schema_hint
@@ -25,6 +25,10 @@ from ..student_helpers import (
 from .. import docs as d
 from ..student_helpers import byte_length
 from ..student_rules import (
+    best_name_match,
+    load_students_for_matching,
+    name_level,
+    name_similarity,
     REFERENCE_VALIDATORS,
     index_add,
     index_find,
@@ -226,7 +230,29 @@ def list_modifications(db: Database = Depends(get_db)):
     except psycopg.Error:
         logger.exception("Lecture des demandes UPB")
         raise ApiError(500, "Impossible de charger les demandes.")
+    for request in requests:
+        request["verification_noms"] = _name_check(request)
     return respond(200, {"status": "success", "data": requests})
+
+
+def _name_check(request: dict) -> dict | None:
+    """Pour une correction qui touche au nom ou aux prénoms : ressemblance avec ce qui est déjà en base."""
+    changes = request.get("modifications") or {}
+    if not isinstance(changes, dict) or not ({"nom", "prenoms"} & set(changes)):
+        return None
+    nom = changes.get("nom") or request["nom"]
+    prenoms = changes.get("prenoms") or request["prenoms"]
+    score = name_similarity(str(nom), str(prenoms), request["nom"], request["prenoms"])
+    return {"score": score, "niveau": name_level(score)}
+
+
+def _send_notice(result: dict, wait: bool = True) -> str:
+    """Envoie l'e-mail de décision (après l'enregistrement) ; `result` reçoit `mail` (+ `mail_erreur` en cas d'échec)."""
+    state, error = mailer.notify(result.pop("notice", None), wait=wait)
+    result["mail"] = state
+    if error:
+        result["mail_erreur"] = error
+    return state
 
 
 def _decide_modification(db: Database, request_id: int, action: str) -> dict:
@@ -256,7 +282,20 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
                         """,
                         (request_id,),
                     )
-                    return {"message": "Demande refusée."}
+                    cursor.execute(
+                        "SELECT matricule, nom, prenoms, email FROM etudiant WHERE id = %s",
+                        (modification["etudiant_id"],),
+                    )
+                    known = cursor.fetchone() or {}
+                    proposed = modification["modifications"] if isinstance(modification["modifications"], dict) else {}
+                    return {
+                        "message": "Demande refusée.",
+                        "notice": {
+                            "kind": "correction", "approved": False, "to": known.get("email") or proposed.get("email"),
+                            "nom": known.get("nom", ""), "prenoms": known.get("prenoms", ""),
+                            "matricule": known.get("matricule"),
+                        },
+                    }
 
                 changes = modification["modifications"]
                 if (
@@ -268,7 +307,7 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
 
                 cursor.execute(
                     """
-                    SELECT matricule, nom, prenoms, date_naissance
+                    SELECT matricule, nom, prenoms, date_naissance, email
                     FROM etudiant WHERE id = %s FOR UPDATE
                     """,
                     (modification["etudiant_id"],),
@@ -299,6 +338,9 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
                             None if label is None else lookup_reference_id(cursor, field, label)
                         )
 
+                notice_email = changes.get("email") if "email" in changes else None
+                notice_nom = changes.get("nom") or student["nom"]
+                notice_prenoms = changes.get("prenoms") or student["prenoms"]
                 assignments = []
                 values = []
                 for field, value in changes.items():
@@ -329,6 +371,11 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
     return {
         "message": "Demande approuvée et informations mises à jour.",
         "matricule": matricule,
+        "notice": {
+            "kind": "correction", "approved": True, "matricule": matricule,
+            "to": notice_email or student["email"],
+            "nom": notice_nom, "prenoms": notice_prenoms,
+        },
     }
 
 
@@ -356,7 +403,8 @@ def process_modification(body: Any = Depends(json_body), db: Database = Depends(
         target_type="demande_correction", target=str(request_id),
     )
     result = _decide_modification(db, request_id, action)
-    audit.annotate(matricule=result.get("matricule"))
+    _send_notice(result)
+    audit.annotate(matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"))
     return respond(200, {"status": "success", **result})
 
 
@@ -612,10 +660,27 @@ def list_creations(db: Database = Depends(get_db)):
                 """
             )
             requests = cursor.fetchall()
+            known = load_students_for_matching(cursor) if requests else []
     except psycopg.Error:
         logger.exception("Lecture des demandes de création UPB")
         raise ApiError(500, "Impossible de charger les demandes.")
+    for request in requests:
+        request["correspondance"] = _creation_match(known, request.get("donnees"))
     return respond(200, {"status": "success", "data": requests})
+
+
+def _creation_match(known: list[dict], fields) -> dict | None:
+    """Dossier déjà en base dont le nom ressemble à celui de la demande (fautes légères tolérées)."""
+    if not isinstance(fields, dict) or not fields.get("nom") or not fields.get("prenoms"):
+        return None
+    found = best_name_match(known, str(fields["nom"]), str(fields["prenoms"]), str(fields.get("date_naissance") or "") or None)
+    if not found:
+        return None
+    row, score = found
+    return {
+        "etudiant_id": row["id"], "matricule": row["matricule"], "nom": row["nom"], "prenoms": row["prenoms"],
+        "score": score, "niveau": name_level(score), "a_completer": not row["matricule"],
+    }
 
 
 def _decide_creation(db: Database, request_id: int, action: str) -> dict:
@@ -644,7 +709,15 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
                         """,
                         (request_id,),
                     )
-                    return {"message": "Demande refusée."}
+                    refused = demande["donnees"] if isinstance(demande["donnees"], dict) else {}
+                    return {
+                        "message": "Demande refusée.",
+                        "notice": {
+                            "kind": "creation", "approved": False, "to": refused.get("email"),
+                            "nom": refused.get("nom", ""), "prenoms": refused.get("prenoms", ""),
+                            "matricule": demande["matricule_saisi"],
+                        },
+                    }
 
                 fields = demande["donnees"]
                 if (
@@ -667,28 +740,49 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
                 if cursor.fetchone():
                     raise ApiError(422, "Ce matricule existe déjà pour un autre étudiant.")
 
-                cursor.execute(
-                    """
-                    INSERT INTO etudiant
-                        (matricule, nom, prenoms, date_naissance, telephone, email, sexe,
-                         allergies_affection, filiere_id, niveau_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (
-                        matricule,
-                        nom,
-                        prenoms,
-                        birth,
-                        fields.get("telephone") or None,
-                        fields.get("email") or None,
-                        fields.get("sexe") or None,
-                        fields.get("allergies_affection") or None,
-                        lookup_reference_id(cursor, "filiere", fields.get("filiere")),
-                        lookup_reference_id(cursor, "niveau", fields.get("niveau")),
-                    ),
+                values = (
+                    fields.get("telephone") or None,
+                    fields.get("email") or None,
+                    fields.get("sexe") or None,
+                    fields.get("allergies_affection") or None,
+                    lookup_reference_id(cursor, "filiere", fields.get("filiere")),
+                    lookup_reference_id(cursor, "niveau", fields.get("niveau")),
                 )
-                student_id = cursor.fetchone()["id"]
+                # Les noms sont déjà en base pour tous les étudiants : si un dossier SANS matricule porte ce nom
+                # (fautes légères tolérées), la demande le complète au lieu de créer un doublon ; le nom et les
+                # prénoms saisis (version corrigée) sont fusionnés dans ce dossier.
+                merged = None
+                found = best_name_match(load_students_for_matching(cursor), nom, prenoms, birth, without_matricule=True)
+                if found:
+                    cursor.execute(
+                        "SELECT id, email FROM etudiant WHERE id = %s AND matricule IS NULL FOR UPDATE", (found[0]["id"],)
+                    )
+                    merged = cursor.fetchone()
+                if merged:
+                    student_id = merged["id"]
+                    cursor.execute(
+                        """
+                        UPDATE etudiant SET matricule = %s, nom = %s, prenoms = %s,
+                            date_naissance = COALESCE(%s, date_naissance), telephone = COALESCE(%s, telephone),
+                            email = COALESCE(%s, email), sexe = COALESCE(%s, sexe),
+                            allergies_affection = COALESCE(%s, allergies_affection),
+                            filiere_id = COALESCE(%s, filiere_id), niveau_id = COALESCE(%s, niveau_id)
+                        WHERE id = %s
+                        """,
+                        (matricule, nom, prenoms, birth, *values, student_id),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO etudiant
+                            (matricule, nom, prenoms, date_naissance, telephone, email, sexe,
+                             allergies_affection, filiere_id, niveau_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (matricule, nom, prenoms, birth, *values),
+                    )
+                    student_id = cursor.fetchone()["id"]
                 cursor.execute(
                     """
                     UPDATE etudiant_creation_demande
@@ -702,8 +796,16 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
         raise ApiError(500, "Erreur lors du traitement de la demande.")
 
     return {
-        "message": "Demande approuvée : le dossier étudiant a été créé.",
+        "message": (
+            "Demande approuvée : le dossier existant a été complété (nom retrouvé en base)."
+            if merged else "Demande approuvée : le dossier étudiant a été créé."
+        ),
         "matricule": matricule,
+        "fusion": bool(merged),
+        "notice": {
+            "kind": "creation", "approved": True, "matricule": matricule,
+            "to": fields.get("email") or (merged or {}).get("email"), "nom": nom, "prenoms": prenoms,
+        },
     }
 
 
@@ -731,7 +833,11 @@ def process_creation(body: Any = Depends(json_body), db: Database = Depends(get_
         target_type="demande_creation", target=str(request_id),
     )
     result = _decide_creation(db, request_id, action)
-    audit.annotate(matricule=result.get("matricule"))
+    _send_notice(result)
+    audit.annotate(
+        matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"),
+        fusion=result.get("fusion"),
+    )
     return respond(200, {"status": "success", **result})
 
 
@@ -744,10 +850,11 @@ def _approve_all(db: Database, table: str, decide, kind: str) -> dict:
     for request_id in ids:
         try:
             result = decide(db, request_id, "approve")
+            mail = _send_notice(result, wait=False)
             approved += 1
             audit.log(
                 f"DEMANDE_{kind}_APPROUVEE", "DEMANDE", target_type=f"demande_{kind.lower()}",
-                target=str(request_id), details={"mode": "masse", "matricule": result.get("matricule")},
+                target=str(request_id), details={"mode": "masse", "matricule": result.get("matricule"), "mail": mail},
             )
         except ApiError as error:
             failures.append({"id": request_id, "message": error.message})
@@ -918,3 +1025,43 @@ def unregister_student(body: Any = Depends(json_body), db: Database = Depends(ge
         raise ApiError(500, "Impossible de désinscrire l'étudiant.")
     audit.annotate(numero_candidat=removed[0]["numero_candidat"])
     return respond(200, {"status": "success", "message": "Étudiant désinscrit du concours."})
+
+
+@router.post(
+    "/api/admin_supprimer_etudiant",
+    tags=["Administration"],
+    summary="Supprimer définitivement un étudiant",
+    description="Supprime le dossier de l'étudiant **et** ce qui en dépend : inscription au concours, historique de "
+    "pointage et demandes de correction. Les demandes d'ajout de dossier déjà traitées sont conservées (sans lien). "
+    "Irréversible. L'événement est tracé dans le journal (matricule et volumes, jamais les données personnelles).",
+    response_model=None,
+    responses={200: {"model": d.SuccessResponse}, **d.errors(400, 401, 404, 500, 503)},
+    openapi_extra=d.request_body(d.UnregisterBody, "Identifiant de l'étudiant."),
+)
+def delete_student(body: Any = Depends(json_body), db: Database = Depends(get_db)):
+    student_id = positive_int((json_object(body) or {}).get("id"))
+    if not student_id:
+        raise ApiError(400, "Identifiant d'étudiant invalide.")
+    audit.annotate(target_type="etudiant", target=str(student_id))
+    try:
+        with db.transaction():
+            with db.cursor() as cursor:
+                cursor.execute("SELECT matricule FROM etudiant WHERE id = %s FOR UPDATE", (student_id,))
+                student = cursor.fetchone()
+                if not student:
+                    raise ApiError(404, "Étudiant introuvable.")
+                cursor.execute("SELECT count(*) AS n FROM pointage_journalier WHERE etudiant_id = %s", (student_id,))
+                pointages = cursor.fetchone()["n"]
+                cursor.execute("SELECT numero_candidat FROM candidat_concours WHERE etudiant_id = %s", (student_id,))
+                candidate = cursor.fetchone()
+                cursor.execute("DELETE FROM etudiant WHERE id = %s", (student_id,))
+    except psycopg.Error:
+        logger.exception("Suppression d'un étudiant UPB")
+        raise ApiError(500, "Impossible de supprimer l'étudiant.")
+    audit.annotate(
+        matricule=student["matricule"],
+        etait_inscrit=bool(candidate),
+        numero_candidat=candidate["numero_candidat"] if candidate else None,
+        pointages_supprimes=pointages,
+    )
+    return respond(200, {"status": "success", "message": "Étudiant supprimé définitivement."})

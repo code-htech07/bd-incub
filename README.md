@@ -71,6 +71,11 @@ Netlify (frontend) + Render (backend) + Neon + UptimeRobot, sans fichier de conf
 |---|---|
 | `DATABASE_URL` | URL de connexion Neon (obligatoire) |
 | `DATABASE_URL_DIRECT` | Connexion Neon sans pooler, utilisée par `scripts.migrate` (facultatif) |
+| `RESEND_API_KEY` | Clé d'API Resend pour les e-mails de décision aux étudiants (vide = aucun e-mail envoyé) |
+| `UPB_MAIL_FROM` | Expéditeur des e-mails, seule adresse visible par l'étudiant (défaut `noreply@synapstic.tech`) |
+| `UPB_MAIL_NAME` | Nom affiché de l'expéditeur (défaut `INCUBATEUR UPB`) |
+| `UPB_MAIL_LOGO_URL` | Logo de l'en-tête des e-mails (https). Vide = `logo-upb.png` du premier site de `UPB_CORS_ORIGINS` |
+| `UPB_MAIL_ENABLED` | `0` coupe les envois sans retirer la clé |
 | `UPB_DOCS_PASSWORD` | Mot de passe d'accès à `/docs`, `/redoc`, `/openapi.json` (10 caractères min.), à remettre aux intégrateurs autorisés |
 | `UPB_SECRET_KEY` | Clé de signature des sessions administrateur, 32 caractères minimum (obligatoire) |
 | `UPB_SESSION_HOURS` | Durée d'une session administrateur (8 h) |
@@ -108,6 +113,7 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 | `GET /api/get_etudiants` | admin | Liste paginée (`page`, `per_page`, `q`) + statistiques |
 | `POST /api/update_etudiant` | admin | Modifier **tous** les champs : nom, prénoms, matricule, date de naissance, filière, niveau, téléphone, e-mail, sexe, allergies, numéro de candidat (une chaîne vide efface un champ facultatif ; le matricule n'est jamais recalculé) |
 | `POST /api/admin_etudiants` | admin | Créer un étudiant (seuls nom et prénoms obligatoires) |
+| `POST /api/admin_supprimer_etudiant` | admin | Supprimer définitivement un étudiant (dossier, inscription, pointages, corrections) |
 | `POST /api/admin_desinscrire` | admin | Désinscrire un étudiant du concours (dossier et pointages conservés) |
 | `POST /api/update_telephone` | admin | Ancienne route : préférer `update_etudiant` |
 | `GET /api/admin_modifications` | admin | Lister les demandes en attente |

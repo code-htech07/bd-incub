@@ -12,6 +12,7 @@ exemple KOUA1703980001.
 """
 import calendar
 import re
+from difflib import SequenceMatcher
 
 from .student_helpers import byte_length, normalize_student_name
 
@@ -143,3 +144,70 @@ def validate_niveau(value) -> str | None:
 
 
 REFERENCE_VALIDATORS = {"filiere": validate_filiere, "niveau": validate_niveau}
+
+
+# ---------------------------------------------------------------------------- comparaison des noms
+# Les noms et prénoms sont déjà en base pour tous les étudiants (même sans autre donnée). Une demande est
+# comparée à ces noms ; de légères fautes de frappe sont tolérées (score de ressemblance >= NAME_TOLERANCE).
+NAME_TOLERANCE = 0.80
+
+
+def _tokens(value: str) -> list[str]:
+    out = []
+    for part in re.split(r"[\s\-'’]+", value or ""):
+        try:
+            out.append(normalize_student_name(part))
+        except ValueError:
+            continue
+    return out
+
+
+def _token_similarity(a: str, b: str) -> float:
+    """Ressemblance 0..1 de deux séries de mots ; un prénom en plus ou en moins n'est pas pénalisé."""
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 0.0
+    short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    remaining = list(long_)
+    total = 0.0
+    for token in short:
+        best = max(remaining, key=lambda other: SequenceMatcher(None, token, other).ratio())
+        total += SequenceMatcher(None, token, best).ratio()
+        remaining.remove(best)
+    return total / len(short)
+
+
+def name_similarity(nom_a: str, prenoms_a: str, nom_b: str, prenoms_b: str) -> float:
+    """Le plus faible des scores nom / prénoms (les deux doivent se ressembler)."""
+    return round(min(_token_similarity(nom_a, nom_b), _token_similarity(prenoms_a, prenoms_b)), 3)
+
+
+def name_level(score: float) -> str:
+    """« identique », « proche » (faute légère tolérée) ou « different »."""
+    return "identique" if score >= 0.999 else "proche" if score >= NAME_TOLERANCE else "different"
+
+
+def load_students_for_matching(cursor) -> list[dict]:
+    cursor.execute("SELECT id, matricule, nom, prenoms, date_naissance FROM etudiant")
+    return cursor.fetchall()
+
+
+def best_name_match(rows: list[dict], nom: str, prenoms: str, birth_iso: str | None = None, without_matricule: bool = False):
+    """(ligne, score) du dossier existant dont le nom ressemble le plus (>= tolérance), sinon None.
+
+    Deux dates de naissance connues et différentes excluent le rapprochement. À score égal, un dossier sans
+    matricule est préféré ; `without_matricule=True` ne considère que ceux-là (dossiers à compléter)."""
+    best = None
+    for row in rows:
+        if without_matricule and row["matricule"]:
+            continue
+        existing = str(row["date_naissance"]) if row["date_naissance"] else None
+        if birth_iso and existing and birth_iso != existing:
+            continue
+        score = name_similarity(nom, prenoms, row["nom"], row["prenoms"])
+        if score < NAME_TOLERANCE:
+            continue
+        rank = (score, not row["matricule"])
+        if best is None or rank > best[0]:
+            best = (rank, row, score)
+    return (best[1], best[2]) if best else None

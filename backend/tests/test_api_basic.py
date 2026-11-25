@@ -150,6 +150,7 @@ def test_openapi_documents_every_route(client):
         ("get", "/api/admin_modifications"), ("post", "/api/admin_modifications"),
         ("post", "/api/import_etudiants"), ("get", "/api/pointage"), ("post", "/api/pointage"),
         ("post", "/api/partenaire/inscrire"), ("post", "/api/admin_etudiants"), ("post", "/api/admin_desinscrire"),
+        ("post", "/api/admin_supprimer_etudiant"),
         ("post", "/api/demander_creation"), ("get", "/api/admin_creations"),
         ("post", "/api/admin_creations"),
     }

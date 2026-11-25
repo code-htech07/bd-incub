@@ -58,6 +58,14 @@ def call(key, matricule=MATRICULE_ALICE, *, ip=ANON_IP, **extra):
     )
 
 
+def register(key, matricule=MATRICULE_ALICE, *, ip=ANON_IP, **extra):
+    if ip not in _ANONYMOUS:
+        _ANONYMOUS[ip] = TestClient(create_app(), client=(ip, 50000)).__enter__()
+    return _ANONYMOUS[ip].post(
+        "/api/partenaire/inscrire", json={"matricule": matricule, **extra}, headers={"X-API-Key": key}
+    )
+
+
 def test_admin_routes_require_authentication(admin):
     with TestClient(create_app()) as anonymous:
         assert anonymous.get("/api/admin_partenaires").status_code == 401
@@ -123,9 +131,11 @@ def test_verification_permission_is_read_only_and_filters_fields(admin):
     assert set(body["data"]) == {"matricule", "nom", "prenoms", "date_naissance", "filiere", "niveau"}
     assert body["data"]["nom"] == "Zztest" and body["data"]["date_naissance"] == "1998-03-17"
     assert admin.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]["numero_candidat"] is None
-    # Un numéro de candidat sans permission d'inscription : refusé
-    refused = call(key, numero_candidat="X-1")
+    # numero_candidat n'a pas sa place dans une vérification ; sans permission, l'inscription est refusée
+    assert call(key, numero_candidat="X-1").status_code == 400
+    refused = register(key)
     assert refused.status_code == 403 and "pas autorisée à inscrire" in refused.json()["message"]
+    assert admin.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]["numero_candidat"] is None
     assert call(key, "INCONNU").status_code == 404
     assert call(key, "").status_code == 400
     # Un étudiant déjà inscrit par ailleurs est signalé, sans rien modifier
@@ -142,14 +152,22 @@ def test_inscription_permission_marks_registered_with_extra_fields(admin):
     created = create(admin, permission="INSCRIPTION", champs=["nom", "sexe", "email", "telephone"])
     assert created.json()["partenaire"]["champs"][0] == "matricule"  # le matricule est toujours inclus
     key = created.json()["cle"]["valeur"]
-    body = call(key, numero_candidat="OFFICIEL-0042").json()
-    assert body["message"] == "Étudiant vérifié et inscrit au concours."
+    # Même avec la permission d'inscription, la vérification n'inscrit pas
+    verified = call(key).json()
+    assert verified["inscription"] is None and set(verified["data"]) == {"matricule", "nom", "sexe", "email", "telephone"}
+    assert admin.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]["numero_candidat"] is None
+    # L'inscription est un appel distinct, fait quand le compte est réellement créé sur le site d'inscription
+    body = register(key, numero_candidat="OFFICIEL-0042").json()
+    assert body["message"] == "Étudiant inscrit au concours."
     assert body["inscription"] == {"numero_candidat": "OFFICIEL-0042", "statut": "EN_ATTENTE", "deja_inscrit": False}
     assert set(body["data"]) == {"matricule", "nom", "sexe", "email", "telephone"}
     assert "date_naissance" not in body["data"] and "allergies_affection" not in body["data"]
     assert admin.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]["numero_candidat"] == "OFFICIEL-0042"
-    again = call(key, numero_candidat="AUTRE").json()["inscription"]
-    assert again["numero_candidat"] == "OFFICIEL-0042" and again["deja_inscrit"] is True
+    again = register(key, numero_candidat="AUTRE").json()
+    assert again["inscription"]["numero_candidat"] == "OFFICIEL-0042" and again["inscription"]["deja_inscrit"] is True
+    assert again["message"] == "Étudiant déjà inscrit au concours."
+    assert call(key).json()["inscription"]["numero_candidat"] == "OFFICIEL-0042"
+    assert register(key, "INCONNU").status_code == 404 and register(key, "").status_code == 400
 
 
 def test_update_permissions_and_activation(admin):
@@ -166,7 +184,8 @@ def test_update_permissions_and_activation(admin):
     assert updated["permission"] == "INSCRIPTION" and updated["champs"] == ["matricule", "email"]
     assert updated["limite_par_minute"] == 500 and updated["updated_at"] and updated["nom"] == "ZZTsite-externe"
     body = call(key).json()
-    assert set(body["data"]) == {"matricule", "email"} and body["inscription"]["deja_inscrit"] is False
+    assert set(body["data"]) == {"matricule", "email"} and body["inscription"] is None  # vérifier n'inscrit pas
+    assert register(key).json()["inscription"]["deja_inscrit"] is False
 
     # Désactivation immédiate puis réactivation
     assert admin.post("/api/admin_partenaires/modifier", json={"id": pid, "actif": False}).status_code == 200
@@ -265,8 +284,10 @@ def test_management_and_usage_are_traced_without_secrets(admin, monkeypatch):
     monkeypatch.setenv("UPB_AUDIT_ENABLED", "1")
     created = create(admin, permission="INSCRIPTION").json()
     key, pid = created["cle"]["valeur"], created["partenaire"]["id"]
-    ok = call(key, numero_candidat="OFFICIEL-7")
+    assert call(key).status_code == 200
+    ok = register(key, numero_candidat="OFFICIEL-7")
     assert ok.status_code == 200
+    register("upb_pas_la_bonne")
     call("upb_pas_la_bonne")
     assert call(key, ip="203.0.113.9").status_code == 200
     admin.post("/api/admin_partenaires/modifier", json={"id": pid, "actif": False})
@@ -281,7 +302,8 @@ def test_management_and_usage_are_traced_without_secrets(admin, monkeypatch):
     actions = [(r["action"], r["statut"]) for r in rows]
     for expected in (("PARTENAIRE_CREE", "SUCCES"), ("PARTENAIRE_DESACTIVE", "SUCCES"), ("PARTENAIRE_ACTIVE", "SUCCES"),
                      ("PARTENAIRE_CLE_GENEREE", "SUCCES"), ("PARTENAIRE_CLE_REVOQUEE", "SUCCES"),
-                     ("INSCRIPTION_CONCOURS", "SUCCES"), ("INSCRIPTION_CONCOURS", "ECHEC")):
+                     ("INSCRIPTION_CONCOURS", "SUCCES"), ("INSCRIPTION_CONCOURS", "ECHEC"),
+                     ("VERIFICATION_PARTENAIRE", "SUCCES"), ("VERIFICATION_PARTENAIRE", "ECHEC")):
         assert expected in actions, (expected, actions)
     reasons = [r["details"].get("raison") for r in rows if r["statut"] == "ECHEC" and r["details"]]
     assert "cle_inconnue" in reasons and "partenaire_desactive" in reasons  # motif précis réservé au journal
@@ -295,7 +317,7 @@ def test_management_and_usage_are_traced_without_secrets(admin, monkeypatch):
 
     # Activité visible dans la fiche : appels, échecs, inscriptions marquées
     stats = [p for p in admin.get("/api/admin_partenaires").json()["data"] if p["id"] == pid][0]["stats"]
-    assert stats["appels_total"] >= 3 and stats["inscrits_marques"] == 1 and stats["derniere_activite"]
+    assert stats["appels_total"] >= 4 and stats["inscrits_marques"] == 1 and stats["derniere_activite"]
     assert stats["echecs_24h"] >= 1
 
 

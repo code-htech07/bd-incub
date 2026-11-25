@@ -513,10 +513,10 @@
         .form-grid .full{grid-column:1/-1}
         .form-grid .field{min-width:0}
         .form-grid label{display:block;margin-bottom:6px;font:700 .72rem var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
-        .form-grid input,.form-grid textarea{width:100%;padding:10px 12px;border:1.5px solid #dbe5f7;border-radius:11px;background:#fff;
+        .form-grid input,.form-grid textarea,.form-grid select{width:100%;padding:10px 12px;border:1.5px solid #dbe5f7;border-radius:11px;background:#fff;
             color:var(--bp);font:500 .9rem var(--font);resize:vertical}
         .form-grid input:disabled{background:#eef2f9;color:var(--mut)}
-        .form-grid input:focus,.form-grid textarea:focus{outline:none;border-color:var(--royal);box-shadow:0 0 0 4px rgba(31,85,216,.14)}
+        .form-grid input:focus,.form-grid textarea:focus,.form-grid select:focus{outline:none;border-color:var(--royal);box-shadow:0 0 0 4px rgba(31,85,216,.14)}
         .form-grid small,.fieldset-note{display:block;margin-top:6px;font-size:.76rem;line-height:1.5;color:var(--mut)}
         .fieldset-note{margin:4px 0 0}
         .fieldset-note.first{margin:-4px 0 4px}
@@ -550,6 +550,21 @@
         .mat-input{width:150px;padding:7px 9px;border:1.5px dashed #e0a43a;border-radius:9px;background:#fff8e8;color:var(--bp);
             font:600 .8rem ui-monospace,Consolas,monospace;text-transform:uppercase;letter-spacing:.03em}
         .mat-input:focus{outline:none;border:1.5px solid var(--royal);background:#fff;box-shadow:0 0 0 4px rgba(31,85,216,.14)}
+
+        /* Actions de ligne et fenêtre étudiant */
+        .row-actions{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:112px}
+        .row-btn{border:1.5px solid #cfdcf3;background:#fff;color:var(--navy);border-radius:10px;padding:7px 12px;font:700 .8rem var(--font);cursor:pointer;
+            transition:background-color .2s,border-color .2s,color .2s}
+        .row-btn:hover{background:#eef3ff;border-color:var(--royal)}
+        .row-btn.danger{color:#8c2630;border-color:#e6c3c7}
+        .row-btn.danger:hover{background:#8c2630;border-color:#8c2630;color:#fff}
+        .req-star{color:#c0392b}
+
+        /* La colonne d'actions reste visible quand le tableau défile horizontalement */
+        #etudiants table thead th:last-child,#etudiants table tbody td:last-child{position:sticky;right:0;z-index:2;background:#f7faff;
+            box-shadow:-10px 0 14px -12px rgba(0,10,70,.45)}
+        #etudiants table thead th:last-child{background:#eaf0fa}
+        .mat-input{min-width:120px}
     </style>
 </head>
 
@@ -677,7 +692,7 @@
                 </div>
                 <button class="admin-action" type="button" id="btn-import">Importer les étudiants</button>
                 <button class="admin-action" type="button" id="btn-template">Télécharger le modèle CSV</button>
-                <p class="hint"><b>Seules les colonnes nom et prenoms sont obligatoires.</b> Colonnes facultatives : matricule, date_naissance (AAAA-MM-JJ ou JJ/MM/AAAA), filiere, niveau, telephone, email, sexe (M/F), allergies_affection. Le matricule n’est jamais généré : s’il est fourni, il est importé tel quel et doit respecter le format (3 ou 4 lettres majuscules, 6 chiffres jjmmaa, 4 chiffres, ex. KOUA1703980001) et être unique ; sinon l’étudiant est créé sans matricule, à renseigner ensuite dans la liste. Les noms et prénoms n’acceptent que l’alphabet français (lettres accentuées, espaces, tirets, apostrophes) : ni chiffres, ni symboles, ni écritures non latines. Sans matricule, un homonyme déjà présent est refusé comme doublon. Les lignes commençant par # sont ignorées.</p>
+                <p class="hint"><b>Seules les colonnes nom et prenoms sont obligatoires.</b> Colonnes facultatives : matricule, date_naissance (AAAA-MM-JJ ou JJ/MM/AAAA), filiere (ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA), niveau (Licence 1, Licence 2 ou Licence 3), telephone, email, sexe (M/F), allergies_affection. Le matricule n’est jamais généré : s’il est fourni, il est importé tel quel et doit respecter le format (3 ou 4 lettres majuscules, 6 chiffres jjmmaa, 4 chiffres, ex. KOUA1703980001) et être unique ; sinon l’étudiant est créé sans matricule, à renseigner ensuite dans la liste. Les noms et prénoms n’acceptent que l’alphabet français (lettres accentuées, espaces, tirets, apostrophes) : ni chiffres, ni symboles, ni écritures non latines. Sans matricule, un homonyme déjà présent est refusé comme doublon. Les lignes commençant par # sont ignorées.</p>
             </div>
             <div class="import-result" id="import-result" aria-live="polite"></div>
         </section>
@@ -770,6 +785,9 @@
             <div class="toolbar">
                 <span class="toolbar-note" id="searchNote">Chargement de la liste…</span>
                 <span class="spacer"></span>
+                <button class="btn-toolbar btn-scan" id="btnNewStudent" type="button" title="Créer un nouvel étudiant">
+                    <span aria-hidden="true">＋</span> Nouvel étudiant
+                </button>
                 <button class="btn-toolbar btn-excel" id="btnExportExcel" title="Exporter toute la liste filtrée en Excel">
                     <span aria-hidden="true">▦</span> Excel
                 </button>
@@ -901,7 +919,7 @@
             <div class="integration-howto">
                 <div>
                     <b>Point d’accès pour les sites externes</b>
-                    <p>Chaque appel doit envoyer une clé d’API dans l’en-tête <code>X-API-Key</code>. La clé n’est affichée qu’une seule fois, à sa création.</p>
+                    <p>Chaque appel doit envoyer une clé d’API dans l’en-tête <code>X-API-Key</code>. La clé n’est affichée qu’une seule fois, à sa création. La vérification n’inscrit jamais : l’inscription se fait par <code>POST /api/partenaire/inscrire</code>, réservé aux clés « Vérification et inscription », quand le compte est effectivement créé.</p>
                 </div>
                 <code class="endpoint" id="i-endpoint">POST /api/partenaire/verifier</code>
             </div>
@@ -910,6 +928,71 @@
         </section>
 
         <!-- Fenêtres : fiche d'intégration, nouvelle clé, clé générée -->
+        <dialog class="upb-dialog" id="student-dialog" aria-labelledby="student-dialog-title">
+            <form id="student-form" autocomplete="off">
+                <header class="dialog-head">
+                    <h3 id="student-dialog-title">Nouvel étudiant</h3>
+                    <button class="dialog-close" type="button" data-close aria-label="Fermer">×</button>
+                </header>
+                <div class="dialog-body">
+                    <p class="dialog-lead" id="student-lead">Seuls le nom et les prénoms sont obligatoires.</p>
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="s-nom">Nom <span class="req-star" title="Obligatoire">*</span></label>
+                            <input id="s-nom" maxlength="150" required>
+                        </div>
+                        <div class="field">
+                            <label for="s-prenoms">Prénoms <span class="req-star" title="Obligatoire">*</span></label>
+                            <input id="s-prenoms" maxlength="150" required>
+                        </div>
+                        <div class="field full">
+                            <label for="s-matricule">Matricule</label>
+                            <input id="s-matricule" maxlength="14" placeholder="Ex. KOUA1703980001 (3 ou 4 lettres, jjmmaa, 4 chiffres)" spellcheck="false" style="text-transform:uppercase">
+                            <small>Jamais calculé. Facultatif ; doit respecter le format et être unique.</small>
+                        </div>
+                        <div class="field">
+                            <label for="s-date">Date de naissance</label>
+                            <input id="s-date" type="date">
+                        </div>
+                        <div class="field">
+                            <label for="s-sexe">Sexe</label>
+                            <select id="s-sexe"><option value="">Non précisé</option><option value="M">Masculin</option><option value="F">Féminin</option></select>
+                        </div>
+                        <div class="field">
+                            <label for="s-filiere">Filière</label>
+                            <select id="s-filiere" data-upb-select data-placeholder="Choisir une filière" data-empty-label="Non précisée"></select>
+                        </div>
+                        <div class="field">
+                            <label for="s-niveau">Niveau</label>
+                            <select id="s-niveau" data-upb-select data-placeholder="Choisir un niveau" data-empty-label="Non précisé"></select>
+                        </div>
+                        <div class="field">
+                            <label for="s-mail">Adresse e-mail</label>
+                            <input id="s-mail" type="email" maxlength="255">
+                        </div>
+                        <div class="field">
+                            <label for="s-tel">Téléphone</label>
+                            <input id="s-tel" maxlength="40" inputmode="tel">
+                        </div>
+                        <div class="field full">
+                            <label for="s-allergies">Allergies ou affection particulière</label>
+                            <textarea id="s-allergies" maxlength="2000" rows="2"></textarea>
+                        </div>
+                        <div class="field full" id="s-numero-field" hidden>
+                            <label for="s-numero">Numéro de candidat (inscription au concours)</label>
+                            <input id="s-numero" maxlength="40">
+                            <small>Modifiable uniquement pour un étudiant inscrit. Pour retirer l’inscription, utilisez « Désinscrire » dans la liste.</small>
+                        </div>
+                    </div>
+                    <p class="auth-error" id="student-error" role="alert" hidden></p>
+                </div>
+                <footer class="dialog-foot">
+                    <button class="admin-action ghost" type="button" data-close>Annuler</button>
+                    <button class="admin-action" type="submit" id="student-submit">Créer l’étudiant</button>
+                </footer>
+            </form>
+        </dialog>
+
         <dialog class="upb-dialog" id="partner-dialog" aria-labelledby="partner-dialog-title">
             <form id="partner-form" autocomplete="off">
                 <header class="dialog-head">
@@ -942,7 +1025,7 @@
                         <label class="choice"><input type="radio" name="p-permission" value="VERIFICATION" checked>
                             <span><b>Vérification seule</b><small>Lit l’identité d’un étudiant à partir de son matricule. Ne modifie rien.</small></span></label>
                         <label class="choice"><input type="radio" name="p-permission" value="INSCRIPTION">
-                            <span><b>Vérification et inscription</b><small>Marque aussi l’étudiant vérifié comme inscrit au concours (site officiel d’inscription).</small></span></label>
+                            <span><b>Vérification et inscription</b><small>Peut aussi marquer un étudiant inscrit au concours par un appel distinct, une fois son compte créé sur le site d’inscription. La simple vérification n’inscrit jamais.</small></span></label>
                     </fieldset>
 
                     <fieldset class="choice-group">
@@ -1140,6 +1223,7 @@
     <div id="toasts" aria-live="polite" aria-atomic="true"></div>
 
     <script src="config.js"></script>
+    <script src="upb-select.js"></script>
     <script src="genie-fx.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script>
@@ -1349,7 +1433,7 @@
                     : `<span class="tag no">Non inscrit</span>`;
                 return `
                 <tr class="${animate ? 'in' : ''}" style="--i:${Math.min(n, 14)}">
-                    <td><span class="mat" id="mat-${e.id}">${e.matricule ? esc(e.matricule) : `<input type="text" class="mat-input" id="matin-${e.id}" maxlength="14" placeholder="À renseigner" title="Matricule à attribuer (ex. KOUA1703980001) puis Enregistrer" autocomplete="off" spellcheck="false">`}</span></td>
+                    <td><span class="mat" id="mat-${e.id}">${e.matricule ? esc(e.matricule) : `<input type="text" class="mat-input" id="matin-${e.id}" maxlength="14" placeholder="À saisir" title="Matricule à renseigner (ex. KOUA1703980001) puis Enregistrer" autocomplete="off" spellcheck="false">`}</span></td>
                     <td>
                         <div class="who">
                             <span class="avatar-sm" aria-hidden="true">${esc(initiales(e))}</span>
@@ -1380,7 +1464,11 @@
                             aria-label="Date de naissance de ${esc(e.nom)} ${esc(e.prenoms)}">
                     </td>
                     <td style="text-align:center">
-                        <button class="save" id="btn-${e.id}" type="button" onclick="enregistrerContact(${e.id})">Enregistrer</button>
+                        <div class="row-actions">
+                            <button class="save" id="btn-${e.id}" type="button" onclick="enregistrerContact(${e.id})">Enregistrer</button>
+                            <button class="row-btn" type="button" onclick="ouvrirEtudiant(${e.id})" title="Modifier tous les champs">Modifier</button>
+                            ${e.numero_candidat ? `<button class="row-btn danger" type="button" onclick="desinscrireEtudiant(${e.id})" title="Retirer l’inscription au concours">Désinscrire</button>` : ''}
+                        </div>
                     </td>
                 </tr>`;
             }).join('');
@@ -2716,7 +2804,8 @@
             VERIFICATION_PARTENAIRE: 'Vérification par une intégration', PARTENAIRE_CREE: 'Intégration créée',
             PARTENAIRE_MODIFIE: 'Intégration modifiée', PARTENAIRE_ACTIVE: 'Intégration activée',
             PARTENAIRE_DESACTIVE: 'Intégration désactivée', PARTENAIRE_CLE_GENEREE: 'Clé d’API générée',
-            PARTENAIRE_CLE_REVOQUEE: 'Clé d’API révoquée', PARTENAIRE_SUPPRIME: 'Intégration supprimée'
+            PARTENAIRE_CLE_REVOQUEE: 'Clé d’API révoquée', PARTENAIRE_SUPPRIME: 'Intégration supprimée',
+            ETUDIANT_CREE: 'Étudiant créé', ETUDIANT_DESINSCRIT: 'Étudiant désinscrit du concours'
         };
         const JOURNAL_CATEGORIES = {
             AUTH: 'Authentification', ETUDIANT: 'Étudiants', DEMANDE: 'Demandes', INSCRIPTION: 'Inscriptions',
@@ -3172,6 +3261,119 @@
         });
         $('i-refresh').addEventListener('click', chargerIntegrations);
         $('i-endpoint').textContent = 'POST ' + location.origin + '/api/partenaire/verifier';
+
+
+        /* ===== Étudiants : création, modification complète, désinscription ===== */
+        const etudiantForm = { courant: null };
+
+        // Listes fermées (source : GET /api/referentiels ; valeurs de repli identiques si l'API tarde)
+        const REFERENTIELS = { filieres: ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"], niveaux: ["Licence 1", "Licence 2", "Licence 3"] };
+
+        function remplirListesFiliereNiveau() {
+            UPBSelect.setOptions($('s-filiere'), REFERENTIELS.filieres);
+            UPBSelect.setOptions($('s-niveau'), REFERENTIELS.niveaux);
+        }
+
+        async function chargerReferentiels() {
+            try {
+                const response = await fetch(API + '/api/referentiels');
+                const data = await response.json();
+                if (response.ok && Array.isArray(data.filieres) && Array.isArray(data.niveaux)) {
+                    REFERENTIELS.filieres = data.filieres;
+                    REFERENTIELS.niveaux = data.niveaux;
+                }
+            } catch (exception) { /* valeurs de repli */ }
+            remplirListesFiliereNiveau();
+        }
+        remplirListesFiliereNiveau();
+        chargerReferentiels();
+
+        function ouvrirEtudiant(id) {
+            const e = id ? etudiants.find(x => String(x.id) === String(id)) : null;
+            etudiantForm.courant = e || null;
+            $('student-form').reset();
+            $('student-error').hidden = true;
+            remplirListesFiliereNiveau();
+            $('student-dialog-title').textContent = e ? 'Modifier l’étudiant' : 'Nouvel étudiant';
+            $('student-lead').textContent = e
+                ? 'Tous les champs sont modifiables. Une valeur vide efface un champ facultatif.'
+                : 'Seuls le nom et les prénoms sont obligatoires.';
+            $('student-submit').textContent = e ? 'Enregistrer les modifications' : 'Créer l’étudiant';
+            $('s-numero-field').hidden = !(e && e.numero_candidat);
+            if (e) {
+                $('s-nom').value = e.nom || '';
+                $('s-prenoms').value = e.prenoms || '';
+                $('s-matricule').value = e.matricule || '';
+                $('s-date').value = e.date_naissance || '';
+                $('s-sexe').value = e.sexe || '';
+                $('s-filiere').value = e.filiere || '';
+                $('s-niveau').value = e.niveau || '';
+                $('s-mail').value = e.email || '';
+                $('s-tel').value = e.telephone || '';
+                $('s-allergies').value = e.allergies_affection || '';
+                $('s-numero').value = e.numero_candidat || '';
+            }
+            $('student-dialog').showModal();
+            $('s-nom').focus();
+        }
+
+        $('student-form').addEventListener('submit', async event => {
+            event.preventDefault();
+            const e = etudiantForm.courant;
+            const bouton = $('student-submit');
+            const erreur = $('student-error');
+            erreur.hidden = true;
+            bouton.disabled = true;
+            const valeurs = {
+                nom: $('s-nom').value.trim(), prenoms: $('s-prenoms').value.trim(),
+                date_naissance: $('s-date').value, sexe: $('s-sexe').value,
+                filiere: $('s-filiere').value.trim(), niveau: $('s-niveau').value.trim(),
+                email: $('s-mail').value.trim(), telephone: $('s-tel').value.trim(),
+                allergies_affection: $('s-allergies').value.trim()
+            };
+            const matricule = $('s-matricule').value.trim().toUpperCase();
+            try {
+                if (e) {
+                    const payload = { id: e.id, ...valeurs };  // les valeurs vides effacent les champs facultatifs
+                    if (matricule && matricule !== (e.matricule || '')) payload.matricule = matricule;
+                    const numero = $('s-numero').value.trim();
+                    if (e.numero_candidat && numero && numero !== e.numero_candidat) payload.numero_candidat = numero;
+                    const data = await envoyerAdmin('/api/update_etudiant', payload);
+                    toast(data.message, 'success');
+                } else {
+                    const payload = {};
+                    Object.entries(valeurs).forEach(([k, v]) => { if (v) payload[k] = v; });
+                    if (matricule) payload.matricule = matricule;
+                    const data = await envoyerAdmin('/api/admin_etudiants', payload);
+                    toast(`${data.message} ${data.data.matricule ? 'Matricule : ' + data.data.matricule : 'Sans matricule : à renseigner.'}`, 'success');
+                }
+                fermerDialogue($('student-dialog'));
+                await chargerEtudiants();
+            } catch (exception) {
+                erreur.textContent = exception.message;
+                erreur.hidden = false;
+            } finally {
+                bouton.disabled = false;
+            }
+        });
+
+        async function desinscrireEtudiant(id) {
+            const e = etudiants.find(x => String(x.id) === String(id));
+            if (!e || !e.numero_candidat) return;
+            const nom = `${e.nom} ${e.prenoms}`;
+            if (!confirm(`Désinscrire ${nom} du concours ?\nSon numéro de candidat (${e.numero_candidat}) sera supprimé. Le dossier étudiant et l’historique de pointage sont conservés.`)) return;
+            try {
+                const data = await envoyerAdmin('/api/admin_desinscrire', { id: e.id });
+                toast(data.message, 'success');
+                await chargerEtudiants();
+            } catch (exception) {
+                toast(exception.message, 'error');
+            }
+        }
+
+        window.ouvrirEtudiant = ouvrirEtudiant;
+        window.desinscrireEtudiant = desinscrireEtudiant;
+        $('btnNewStudent').addEventListener('click', () => ouvrirEtudiant(null));
 
         function boot() {
             $('datePointage').value = pointageDate;

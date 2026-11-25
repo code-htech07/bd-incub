@@ -63,11 +63,11 @@
                         </div>
                         <div>
                             <label for="filiere">Filière</label>
-                            <input type="text" id="filiere">
+                            <select id="filiere" data-upb-select data-size="lg" data-placeholder="Choisir ma filière" data-empty-label="Non précisée"></select>
                         </div>
                         <div>
                             <label for="niveau">Niveau</label>
-                            <input type="text" id="niveau">
+                            <select id="niveau" data-upb-select data-size="lg" data-placeholder="Choisir mon niveau" data-empty-label="Non précisé"></select>
                         </div>
                         <div>
                             <label for="date-naissance-correction">Date de naissance <small>(facultative)</small></label>
@@ -104,9 +104,22 @@
     <footer class="foot">&copy; 2026 - Incubateur UPB</footer>
 
     <script src="config.js"></script>
+    <script src="upb-select.js"></script>
     <script src="genie-fx.js"></script>
     <script>
         const API = (window.UPB_API_URL || '').replace(/\/+$/, '');
+        // Listes fermées (source : GET /api/referentiels ; valeurs de repli identiques)
+        const REFERENTIELS = { filieres: ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"], niveaux: ["Licence 1", "Licence 2", "Licence 3"] };
+        function appliquerReferentiels() {
+            UPBSelect.setOptions(document.getElementById('filiere'), REFERENTIELS.filieres);
+            UPBSelect.setOptions(document.getElementById('niveau'), REFERENTIELS.niveaux);
+        }
+        appliquerReferentiels();
+        fetch(API + '/api/referentiels').then(r => r.json()).then(d => {
+            if (Array.isArray(d.filieres) && Array.isArray(d.niveaux)) {
+                REFERENTIELS.filieres = d.filieres; REFERENTIELS.niveaux = d.niveaux; appliquerReferentiels();
+            }
+        }).catch(() => { /* valeurs de repli */ });
         let matriculeActuel = "";
         let sexeChoisi = "";
         let modeCreation = false; // true : matricule inconnu, le candidat renseigne son dossier

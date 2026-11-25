@@ -120,7 +120,8 @@ def test_every_kind_of_action_is_traced(audited):
     # --- partenaire : inscription (succès, clé invalide) ---
     with TestClient(create_app()) as anonymous:
         assert anonymous.post("/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE}, headers={"X-API-Key": key}).status_code == 200
-        assert anonymous.post("/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE}, headers={"X-API-Key": "upb_faux"}).status_code == 401
+        assert anonymous.post("/api/partenaire/inscrire", json={"matricule": MATRICULE_ALICE}, headers={"X-API-Key": key}).status_code == 200
+        assert anonymous.post("/api/partenaire/inscrire", json={"matricule": MATRICULE_ALICE}, headers={"X-API-Key": "upb_faux"}).status_code == 401
         # --- admin : connexion (échec puis succès) et jamais le mot de passe ---
         assert anonymous.post("/api/admin_login", json={"identifiant": ADMIN_ID, "password": "FAUX-mot-de-passe"}).status_code == 401
         ok = anonymous.post("/api/admin_login", json={"identifiant": ADMIN_ID.upper(), "password": ADMIN_PASSWORD})

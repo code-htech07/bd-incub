@@ -23,7 +23,17 @@ from ..student_helpers import (
     valid_email,
 )
 from .. import docs as d
-from ..student_rules import index_add, index_find, load_name_index, validate_matricule, validate_name
+from ..student_helpers import byte_length
+from ..student_rules import (
+    REFERENCE_VALIDATORS,
+    index_add,
+    index_find,
+    load_name_index,
+    validate_filiere,
+    validate_matricule,
+    validate_name,
+    validate_niveau,
+)
 from .common import json_body, json_object, positive_int
 
 logger = logging.getLogger(__name__)
@@ -275,6 +285,12 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
                             changes[field] = validate_name(changes[field], label)
                         except ValueError as error:
                             raise ApiError(422, str(error))
+                for field, validator in REFERENCE_VALIDATORS.items():
+                    if changes.get(field):
+                        try:
+                            changes[field] = validator(changes[field])
+                        except ValueError as error:
+                            raise ApiError(422, str(error))
 
                 for field, column in (("filiere", "filiere_id"), ("niveau", "niveau_id")):
                     if field in changes:
@@ -379,6 +395,8 @@ def _normalize_header(value: str) -> str:
     "présent (même date de naissance, ou date inconnue) est refusé comme doublon. "
     "Les noms et prénoms n'acceptent que les lettres de l'alphabet français, "
     "espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). "
+    "`filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : Licence 1, Licence 2 ou Licence 3 "
+    "(casse et espaces ignorés) ; toute autre valeur est une erreur de ligne. "
     "Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). "
     "Tout ou rien : une erreur annule l'import.",
     response_model=None,
@@ -463,6 +481,12 @@ def import_students(
                         matricule = validate_matricule(raw_matricule) if raw_matricule else None
                         nom = validate_name(nom, "Nom")
                         prenoms = validate_name(prenoms, "Prénoms")
+                    except ValueError as error:
+                        errors.append(f"Ligne {row_number} : {error}")
+                        continue
+                    try:
+                        filiere = validate_filiere(filiere) or ""
+                        niveau = validate_niveau(niveau) or ""
                     except ValueError as error:
                         errors.append(f"Ligne {row_number} : {error}")
                         continue
@@ -635,6 +659,8 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
                     matricule = validate_matricule(demande["matricule_saisi"])
                     nom = validate_name(fields["nom"], "Nom")
                     prenoms = validate_name(fields["prenoms"], "Prénoms")
+                    fields["filiere"] = validate_filiere(fields.get("filiere"))
+                    fields["niveau"] = validate_niveau(fields.get("niveau"))
                 except ValueError as error:
                     raise ApiError(422, str(error))
                 cursor.execute("SELECT id FROM etudiant WHERE matricule = %s", (matricule,))
@@ -758,3 +784,137 @@ def approve_all(db: Database = Depends(get_db)):
         200,
         {"status": "success", "message": message, "modifications": modifications, "creations": creations},
     )
+
+
+STUDENT_SELECT = """
+    SELECT e.id, e.matricule, e.nom, e.prenoms, e.date_naissance, e.telephone, e.email, e.sexe,
+           e.allergies_affection, f.libelle AS filiere, n.libelle AS niveau, c.numero_candidat, c.statut
+    FROM etudiant e
+    LEFT JOIN filiere f ON e.filiere_id = f.id
+    LEFT JOIN niveau n ON e.niveau_id = n.id
+    LEFT JOIN candidat_concours c ON e.id = c.etudiant_id
+"""
+
+
+@router.post(
+    "/api/admin_etudiants",
+    tags=["Administration"],
+    summary="Créer un étudiant",
+    description="Création directe d'un dossier par un administrateur. **Seuls `nom` et `prenoms` sont obligatoires.** "
+    "Matricule facultatif : s'il est fourni, il est contrôlé (format) et doit être unique (`409`) ; sans matricule, "
+    "un homonyme exact déjà présent (même date de naissance, ou date inconnue) est refusé (`409`). "
+    "Noms et prénoms : alphabet français uniquement. Filière (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveau (Licence 1, 2 ou 3) : listes fermées.",
+    response_model=None,
+    responses={201: {"model": d.StudentCreatedResponse}, **d.errors(401, 409, 422, 500, 503)},
+    openapi_extra=d.request_body(d.StudentCreateBody, "Fiche du nouvel étudiant."),
+)
+def create_student(body: Any = Depends(json_body), db: Database = Depends(get_db)):
+    data = json_object(body) or {}
+    try:
+        nom = validate_name(data.get("nom"), "Nom")
+        prenoms = validate_name(data.get("prenoms"), "Prénoms")
+        matricule = validate_matricule(data["matricule"]) if data.get("matricule") not in (None, "") else None
+    except ValueError as error:
+        raise ApiError(422, str(error))
+
+    def text(key: str, maximum: int, label: str) -> str | None:
+        value = data.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or byte_length(value.strip()) > maximum:
+            raise ApiError(422, f"{label} invalide ou trop long.")
+        return value.strip() or None
+
+    birth = None
+    if data.get("date_naissance") not in (None, ""):
+        birth = parse_student_date(data["date_naissance"]) if isinstance(data["date_naissance"], str) else None
+        if not birth:
+            raise ApiError(422, "Date de naissance invalide (AAAA-MM-JJ ou JJ/MM/AAAA, pas de date future).")
+    email = text("email", 255, "Adresse e-mail")
+    if email and not valid_email(email):
+        raise ApiError(422, "Adresse e-mail invalide.")
+    sexe = (text("sexe", 1, "Sexe") or "").upper() or None
+    if sexe and sexe not in ("M", "F"):
+        raise ApiError(422, "Le sexe doit être M ou F.")
+    telephone = text("telephone", 40, "Téléphone")
+    allergies = text("allergies_affection", 2000, "Allergies / affection")
+    try:
+        filiere = validate_filiere(text("filiere", 150, "Filière"))
+        niveau = validate_niveau(text("niveau", 150, "Niveau"))
+    except ValueError as error:
+        raise ApiError(422, str(error))
+    audit.annotate(
+        target_type="matricule" if matricule else "etudiant", target=matricule or f"{nom} {prenoms}",
+        sans_matricule=matricule is None,
+    )
+
+    try:
+        with db.transaction():
+            with db.cursor() as cursor:
+                if matricule:
+                    cursor.execute("SELECT id FROM etudiant WHERE matricule = %s", (matricule,))
+                    if cursor.fetchone():
+                        raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
+                else:
+                    homonym = index_find(load_name_index(cursor), nom, prenoms, birth)
+                    if homonym is not False:
+                        raise ApiError(
+                            409,
+                            f"Doublon : {nom} {prenoms} existe déjà "
+                            f"({'matricule ' + homonym if homonym else 'sans matricule'}). Renseignez un "
+                            "matricule ou une date de naissance différente s'il s'agit d'un homonyme.",
+                        )
+                cursor.execute(
+                    """
+                    INSERT INTO etudiant (matricule, nom, prenoms, date_naissance, telephone, email, sexe,
+                                          allergies_affection, filiere_id, niveau_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    """,
+                    (
+                        matricule, nom, prenoms, birth, telephone, email, sexe, allergies,
+                        lookup_reference_id(cursor, "filiere", filiere),
+                        lookup_reference_id(cursor, "niveau", niveau),
+                    ),
+                )
+                student_id = cursor.fetchone()["id"]
+                cursor.execute(STUDENT_SELECT + " WHERE e.id = %s", (student_id,))
+                created = cursor.fetchone()
+    except psycopg.errors.UniqueViolation:
+        raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
+    except psycopg.Error:
+        logger.exception("Création d'un étudiant UPB")
+        raise ApiError(500, "Impossible de créer l'étudiant.")
+    audit.annotate(target=str(student_id), target_type="etudiant", matricule=matricule)
+    return respond(201, {"status": "success", "message": "Étudiant créé.", "data": created})
+
+
+@router.post(
+    "/api/admin_desinscrire",
+    tags=["Administration"],
+    summary="Désinscrire un étudiant du concours",
+    description="Supprime l'inscription au concours (numéro de candidat) de l'étudiant. Le dossier étudiant et "
+    "l'historique de pointage sont conservés. `404` si l'étudiant n'est pas inscrit. Le site d'inscription peut "
+    "ensuite l'inscrire de nouveau (`/api/partenaire/inscrire`).",
+    response_model=None,
+    responses={200: {"model": d.SuccessResponse}, **d.errors(400, 401, 404, 500, 503)},
+    openapi_extra=d.request_body(d.UnregisterBody, "Identifiant de l'étudiant."),
+)
+def unregister_student(body: Any = Depends(json_body), db: Database = Depends(get_db)):
+    student_id = positive_int((json_object(body) or {}).get("id"))
+    if not student_id:
+        raise ApiError(400, "Identifiant d'étudiant invalide.")
+    audit.annotate(target_type="etudiant", target=str(student_id))
+    try:
+        with db.transaction():
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM candidat_concours WHERE etudiant_id = %s RETURNING numero_candidat", (student_id,)
+                )
+                removed = cursor.fetchall()
+                if not removed:
+                    raise ApiError(404, "Cet étudiant n'est pas inscrit au concours.")
+    except psycopg.Error:
+        logger.exception("Désinscription UPB")
+        raise ApiError(500, "Impossible de désinscrire l'étudiant.")
+    audit.annotate(numero_candidat=removed[0]["numero_candidat"])
+    return respond(200, {"status": "success", "message": "Étudiant désinscrit du concours."})

@@ -87,8 +87,8 @@ def test_only_nom_and_prenoms_are_required(client):
 def test_each_optional_column_can_be_absent_empty_or_filled(client, column):
     """Chaque colonne facultative : absente du fichier, présente mais vide, ou renseignée."""
     values = {
-        "matricule": "ZZTO1703980001", "date_naissance": "17/03/1998", "filiere": "ZZTEST Mines",
-        "niveau": "ZZTEST L1", "telephone": "0102030405", "email": "o@exemple.ci", "sexe": "F",
+        "matricule": "ZZTO1703980001", "date_naissance": "17/03/1998", "filiere": "RIT",
+        "niveau": "Licence 1", "telephone": "0102030405", "email": "o@exemple.ci", "sexe": "F",
         "allergies_affection": "Arachides",
     }
     assert import_csv(client, "nom;prenoms\nZztest;Absente\n").status_code == 201
@@ -174,7 +174,7 @@ def test_rows_without_matricule_are_checked_for_duplicates_by_name(client):
     assert response.status_code == 201, response.text
 
 
-def test_a_matricule_can_be_assigned_later_but_not_changed(client):
+def test_a_matricule_can_be_assigned_later_and_changed_by_the_admin(client):
     assert import_csv(client, "nom;prenoms\nZztest;Alice\n").status_code == 201
     row = listing(client)["data"][0]
     assert row["matricule"] is None
@@ -186,8 +186,11 @@ def test_a_matricule_can_be_assigned_later_but_not_changed(client):
     assert response.status_code == 200 and response.json()["data"] == {"matricule": "ZZTA1703980001"}
     assert student(client, "ZZTA1703980001")["nom"] == "Zztest"
     assert update("ZZTA1703980001").status_code == 200  # même valeur : sans effet
-    response = update("ZZTB0205990001")  # déjà attribué : non modifiable
-    assert response.status_code == 422 and "déjà attribué" in response.json()["message"]
+    response = update("ZZTB0205990001")  # un matricule déjà attribué peut être modifié par l'administrateur
+    assert response.status_code == 200 and response.json()["data"] == {"matricule": "ZZTB0205990001"}
+    assert client.post("/api/verifier", json={"matricule": "ZZTA1703980001"}).status_code == 404
+    assert student(client, "ZZTB0205990001")["nom"] == "Zztest"
+    assert update("ZZTA1703980001").status_code == 200  # et être rétabli
     # Un matricule déjà pris par un autre étudiant : 409
     assert import_csv(client, "nom;prenoms\nZztest;Bob\n").status_code == 201
     bob = [r for r in listing(client)["data"] if r["prenoms"] == "Bob"][0]
@@ -244,7 +247,7 @@ def test_import_template_matches_the_importer(client):
     assert body["imported"] == 3 and body["sans_matricule"] == 1  # le 3e exemple n'a pas de matricule
     assert body["matricules"] == ["ZZTA1703980001", "ZZTA2005000001"]
     alain = student(client, "ZZTA1703980001")
-    assert alain["prenoms"] == "Alain" and alain["filiere"] == "Génie Informatique" and alain["niveau"] == "Licence 3"
+    assert alain["prenoms"] == "Alain" and alain["filiere"] == "ASSRI" and alain["niveau"] == "Licence 3"
     assert student(client, "ZZTA2005000001")["date_naissance"] is None  # la date reste facultative
 
 

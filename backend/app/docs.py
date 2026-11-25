@@ -76,8 +76,8 @@ class ModificationBody(BaseModel):
         description="`AAAA-MM-JJ`, `JJ/MM/AAAA` ou `JJ-MM-AAAA` ; pas de date future.",
         examples=["1998-03-17"],
     )
-    filiere: str | None = Field(default=None, max_length=150, description="Vide = effacer.")
-    niveau: str | None = Field(default=None, max_length=150, description="Vide = effacer.")
+    filiere: str | None = Field(default=None, max_length=150, description="ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; vide = effacer.")
+    niveau: str | None = Field(default=None, max_length=150, description="Licence 1, Licence 2 ou Licence 3 ; vide = effacer.")
     telephone: str | None = Field(default=None, max_length=40, description="Vide = effacer.")
     email: str | None = Field(default=None, examples=["nom@exemple.ci"], description="Vide = effacer.")
     sexe: str | None = Field(default=None, description="`M` ou `F` ; vide = effacer.")
@@ -85,17 +85,44 @@ class ModificationBody(BaseModel):
 
 
 class UpdateStudentBody(BaseModel):
+    """Seuls les champs présents sont modifiés ; une chaîne vide efface un champ facultatif."""
+
     id: int = Field(ge=1, description="Identifiant interne (champ `id` de `get_etudiants`).")
+    nom: str | None = Field(default=None, description="Alphabet français uniquement ; obligatoire (non effaçable).")
+    prenoms: str | None = Field(default=None, description="Alphabet français uniquement ; obligatoire (non effaçable).")
+    matricule: str | None = Field(
+        default=None,
+        description="Nouveau matricule (format `KOUA1703980001`, unique : `409` sinon). Vide : inchangé.",
+    )
+    date_naissance: str | None = Field(default=None, description="`AAAA-MM-JJ` ou `JJ/MM/AAAA` ; vide : efface.")
+    filiere: str | None = Field(default=None, description="ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; vide : efface.")
+    niveau: str | None = Field(default=None, description="Licence 1, Licence 2 ou Licence 3 ; vide : efface.")
     telephone: str | None = None
     email: str | None = None
     sexe: str | None = Field(default=None, description="`M` ou `F`.")
     allergies_affection: str | None = Field(default=None, max_length=2000)
-    date_naissance: str | None = Field(default=None, description="`AAAA-MM-JJ` ou `JJ/MM/AAAA`. Ne modifie jamais le matricule.")
-    matricule: str | None = Field(
-        default=None,
-        description="Attribue un matricule à un étudiant qui n'en a pas (format `KOUA1703980001`, unique : `409` "
-        "sinon). Un matricule déjà attribué ne peut pas être modifié (`422`).",
+    numero_candidat: str | None = Field(
+        default=None, max_length=40, description="Modifie le numéro de candidat d'un étudiant déjà inscrit (`422` sinon)."
     )
+
+
+class StudentCreateBody(BaseModel):
+    """Création d'un étudiant par un administrateur : seuls nom et prénoms sont obligatoires."""
+
+    nom: str = Field(examples=["Kouadio"])
+    prenoms: str = Field(examples=["Alain"])
+    matricule: str | None = Field(default=None, description="Facultatif : `KOUA1703980001` (format et unicité contrôlés).")
+    date_naissance: str | None = None
+    filiere: str | None = None
+    niveau: str | None = None
+    telephone: str | None = None
+    email: str | None = None
+    sexe: str | None = Field(default=None, description="`M` ou `F`.")
+    allergies_affection: str | None = Field(default=None, max_length=2000)
+
+
+class UnregisterBody(BaseModel):
+    id: int = Field(ge=1, description="Identifiant interne de l'étudiant (champ `id` de `get_etudiants`).")
 
 
 class UpdatePhoneBody(BaseModel):
@@ -293,12 +320,6 @@ class LoginResponse(SuccessResponse):
 
 class PartnerVerifyBody(BaseModel):
     matricule: str = Field(max_length=40, examples=[MATRICULE_EXAMPLE])
-    numero_candidat: str | None = Field(
-        default=None,
-        max_length=40,
-        description="Numéro de candidat attribué par le site d'inscription ; enregistré à la "
-        "première inscription (un numéro est généré s'il est absent).",
-    )
     nom: str | None = Field(default=None, description="Facultatif : nom saisi par l'utilisateur, à comparer au dossier.")
     prenoms: str | None = Field(default=None, description="Facultatif : prénoms saisis, à comparer au dossier.")
     date_naissance: str | None = Field(
@@ -310,6 +331,21 @@ class PartnerRegistration(BaseModel):
     numero_candidat: str = Field(examples=["GENIE-2026-A1B2C"])
     statut: str = Field(examples=["EN_ATTENTE"])
     deja_inscrit: bool = Field(description="`true` si l'étudiant était déjà inscrit avant cet appel.")
+
+
+class PartnerRegisterBody(BaseModel):
+    matricule: str = Field(max_length=40, examples=[MATRICULE_EXAMPLE])
+    numero_candidat: str | None = Field(
+        default=None,
+        max_length=40,
+        description="Numéro de candidat attribué par le site d'inscription ; enregistré à la "
+        "première inscription (un numéro est généré s'il est absent).",
+    )
+
+
+class PartnerRegisterResponse(SuccessResponse):
+    data: dict[str, Any] = Field(description="Données de l'étudiant, limitées aux champs autorisés pour ce partenaire.")
+    inscription: PartnerRegistration
 
 
 class PartnerVerifyResponse(SuccessResponse):
@@ -325,8 +361,8 @@ class PartnerVerifyResponse(SuccessResponse):
         "`sexe`, `email`, `telephone`, `allergies_affection`)."
     )
     inscription: PartnerRegistration | None = Field(
-        description="Inscription au concours ; `null` si l'étudiant n'est pas inscrit et que la clé n'a "
-        "pas la permission INSCRIPTION."
+        description="Inscription au concours ; `null` si l'étudiant n'est pas inscrit. La vérification "
+        "n'inscrit jamais."
     )
 
 
@@ -493,3 +529,13 @@ class PartnerKeyBody(BaseModel):
 
 class PartnerIdBody(BaseModel):
     id: int = Field(ge=1)
+
+
+class StudentCreatedResponse(SuccessResponse):
+    data: AdminStudent
+
+
+class ReferentielsResponse(BaseModel):
+    status: Literal["success"] = "success"
+    filieres: list[str] = Field(examples=[["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"]])
+    niveaux: list[str] = Field(examples=[["Licence 1", "Licence 2", "Licence 3"]])

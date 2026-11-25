@@ -32,6 +32,8 @@ MATRICULE_RULE = (
 
 def validate_name(value, label: str) -> str:
     """Retourne le nom nettoyé (espaces réduits, apostrophe typographique normalisée) ou lève ValueError."""
+    if value is None:
+        raise ValueError(f"{label} obligatoire.")
     if not isinstance(value, str):
         raise ValueError(f"{label} invalide.")
     cleaned = " ".join(value.replace("’", "'").replace("‘", "'").split())
@@ -107,3 +109,37 @@ def index_find(index: dict, nom: str, prenoms: str, birth_iso: str | None):
         if birth_iso is None or existing is None or existing == birth_iso:
             return matricule
     return False
+
+
+# ---------------------------------------------------------------------------- filières et niveaux
+# Listes fermées : une seule source de vérité (aussi publiée par GET /api/referentiels pour les pages).
+FILIERES = ("ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA")
+NIVEAUX = ("Licence 1", "Licence 2", "Licence 3")
+
+
+def _reference(value, allowed: tuple[str, ...], label: str, feminine: bool) -> str | None:
+    """Forme canonique d'une valeur de la liste (casse et espaces ignorés) ; None si vide."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} invalide.")
+    key = "".join(value.split()).casefold()
+    if not key:
+        return None
+    for item in allowed:
+        if "".join(item.split()).casefold() == key:
+            return item
+    shown = " ".join(value.split())[:40]
+    unknown = f"{label} non reconnue" if feminine else f"{label} non reconnu"
+    raise ValueError(f"{unknown} : « {shown} ». Valeurs autorisées : {', '.join(allowed)}.")
+
+
+def validate_filiere(value) -> str | None:
+    return _reference(value, FILIERES, "Filière", True)
+
+
+def validate_niveau(value) -> str | None:
+    return _reference(value, NIVEAUX, "Niveau", False)
+
+
+REFERENCE_VALIDATORS = {"filiere": validate_filiere, "niveau": validate_niveau}

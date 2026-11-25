@@ -93,8 +93,10 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 | Méthode et chemin | Auth | Fonction |
 |---|---|---|
 | `POST /api/verifier` | — | Retrouver un dossier par `matricule` |
+| `GET /api/referentiels` | — | Listes fermées : filières (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveaux (Licence 1 à 3) |
 | `POST /api/demander_modification` | — | Proposer une correction à valider (`409` si déjà en attente) |
-| `POST /api/partenaire/verifier` | clé d'API | **Intégrations externes** : le matricule suffit ; renvoie `verifie` et les seules données autorisées. Selon la permission de la clé, marque aussi l'étudiant inscrit au concours (idempotent) |
+| `POST /api/partenaire/verifier` | clé d'API | **Intégrations externes** : le matricule suffit ; renvoie `verifie` et les seules données autorisées. **Lecture seule : n'inscrit jamais** |
+| `POST /api/partenaire/inscrire` | clé d'API (permission « inscription ») | Marque l'étudiant inscrit au concours, à appeler **uniquement quand le compte est effectivement créé** sur le site d'inscription (idempotent) |
 | `GET /api/admin_partenaires` | admin | Lister les intégrations (autorisations, clés sans leur valeur, activité) |
 | `POST /api/admin_partenaires` | admin | Créer une intégration et générer sa première clé (affichée une seule fois) |
 | `POST /api/admin_partenaires/modifier` | admin | Modifier permission, données transmises, IP autorisées, quota ; activer / désactiver |
@@ -104,7 +106,9 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 | `POST /api/admin_login` | — | Connexion `{"identifiant", "password"}` → jeton de session (5 échecs = blocage 15 min) |
 | `POST /api/admin_auth_check` | admin | Vérifier la session |
 | `GET /api/get_etudiants` | admin | Liste paginée (`page`, `per_page`, `q`) + statistiques |
-| `POST /api/update_etudiant` | admin | Modifier téléphone, e-mail, sexe, allergies, date de naissance ; attribuer un matricule à un étudiant qui n'en a pas (jamais recalculé) |
+| `POST /api/update_etudiant` | admin | Modifier **tous** les champs : nom, prénoms, matricule, date de naissance, filière, niveau, téléphone, e-mail, sexe, allergies, numéro de candidat (une chaîne vide efface un champ facultatif ; le matricule n'est jamais recalculé) |
+| `POST /api/admin_etudiants` | admin | Créer un étudiant (seuls nom et prénoms obligatoires) |
+| `POST /api/admin_desinscrire` | admin | Désinscrire un étudiant du concours (dossier et pointages conservés) |
 | `POST /api/update_telephone` | admin | Ancienne route : préférer `update_etudiant` |
 | `GET /api/admin_modifications` | admin | Lister les demandes en attente |
 | `POST /api/admin_modifications` | admin | `{"id": 1, "action": "approve" \| "reject"}` |
@@ -125,7 +129,7 @@ Règles métier :
 - **Matricule** : identifiant **fourni, jamais calculé** par le système (l'étudiant le saisit, ou il figure
   dans le fichier d'import). Format : 3 ou 4 lettres majuscules (nom et initiale du prénom) + 6 chiffres
   `jjmmaa` (jour et mois possibles) + 4 chiffres, ex. `KOUA1703980001`. Il est unique, ne change jamais
-  quand le nom ou la date de naissance sont corrigés, et ne peut pas être modifié une fois attribué.
+  quand le nom ou la date de naissance sont corrigés. Un administrateur peut l'attribuer ou le modifier (format et unicité contrôlés).
   Un étudiant importé **sans matricule** est créé sans matricule ; un administrateur le renseigne ensuite
   dans la liste (champ « À renseigner », `POST /api/update_etudiant`). Sans matricule, il reste introuvable
   par le portail et les intégrations.

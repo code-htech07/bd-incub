@@ -1,7 +1,7 @@
 """Parcours complet contre la vraie base Neon (DATABASE_URL).
 
 Toutes les données créées portent le préfixe de test « ZZTEST » et sont supprimées
-à la fin ; filières/niveaux « ZZTEST… » aussi.
+à la fin (les filières et niveaux sont désormais ceux des listes fermées, conservés).
 """
 import psycopg
 import pytest
@@ -17,8 +17,8 @@ ADMIN_ID = "ZZTadmin"
 ADMIN_PASSWORD = "Mot-de-passe-test-1"
 CSV = (
     "Matricule;Nom;Prénom;Date de naissance;Filière;Niveau;Téléphone;Email;Sexe\n"
-    "ZZTA1703980001;Zztest;Alice;17/03/1998;ZZTEST Génie;ZZTEST L3;0102030405;alice@exemple.ci;f\n"
-    "zztb0205990001;Zztest;Bob;1999-05-02;ZZTEST Génie;ZZTEST L2;;;M\n"
+    "ZZTA1703980001;Zztest;Alice;17/03/1998;ASSRI;Licence 3;0102030405;alice@exemple.ci;f\n"
+    "zztb0205990001;Zztest;Bob;1999-05-02;ASSRI;Licence 2;;;M\n"
 )
 MATRICULE_ALICE = "ZZTA1703980001"
 MATRICULE_BOB = "ZZTB0205990001"
@@ -75,65 +75,80 @@ def test_full_flow(client):
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["nom"] == "Zztest" and data["date_naissance"] == "1998-03-17"
-    assert data["filiere"] == "ZZTEST Génie" and data["sexe"] == "F"
+    assert data["filiere"] == "ASSRI" and data["sexe"] == "F"
     unknown = client.post("/api/verifier", json={"matricule": "INCONNU"})
     assert unknown.status_code == 404
     assert unknown.json()["message"] == "Matricule non reconnus dans la base I-UPB."
 
     # --- Liste admin ---
-    listing = client.get("/api/get_etudiants", params={"q": "ZZTEST G"}).json()
+    listing = client.get("/api/get_etudiants", params={"q": "Zztest"}).json()
     assert listing["total"] == 2 and listing["page"] == 1
     assert {"total", "inscrits", "telephones", "emails", "filieres", "niveaux"} <= set(listing["stats"])
     assert client.get("/api/get_etudiants", headers={"Authorization": "Bearer x"}).status_code == 401
 
-    # --- Marquage « inscrit » par le site officiel (clé d'API partenaire) ---
+    # --- Vérification (lecture seule) puis inscription effective par le site officiel (clé d'API) ---
     key = make_partner()
     headers = {"X-API-Key": key}
     anonymous = TestClient(create_app())
     with anonymous:
         before = client.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]
         assert before["numero_candidat"] is None
-        response = anonymous.post(
-            "/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE.lower()}, headers=headers
-        )
+        # La simple vérification n'inscrit JAMAIS, même avec la permission d'inscription
+        for _ in range(2):
+            response = anonymous.post(
+                "/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE.lower()}, headers=headers
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["data"]["nom"] == "Zztest" and body["data"]["date_naissance"] == "1998-03-17"
+            assert "id" not in body["data"] and body["inscription"] is None
+        still = client.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]
+        assert still["numero_candidat"] is None
+        # numero_candidat n'a pas sa place dans une vérification
+        assert anonymous.post(
+            "/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE, "numero_candidat": "X"}, headers=headers
+        ).status_code == 400
+        # Inscription effective (compte créé sur le site officiel) : /api/partenaire/inscrire
+        response = anonymous.post("/api/partenaire/inscrire", json={"matricule": MATRICULE_ALICE.lower()}, headers=headers)
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["data"]["nom"] == "Zztest" and body["data"]["date_naissance"] == "1998-03-17"
-        assert "id" not in body["data"]
         numero = body["inscription"]["numero_candidat"]
         assert numero.startswith("GENIE-2026-") and len(numero) == len("GENIE-2026-") + 5
-        assert body["inscription"]["deja_inscrit"] is False
+        assert body["inscription"]["deja_inscrit"] is False and body["message"] == "Étudiant inscrit au concours."
         # Idempotent : même numéro, plus de nouvelle ligne
-        response = anonymous.post("/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE}, headers=headers)
+        response = anonymous.post("/api/partenaire/inscrire", json={"matricule": MATRICULE_ALICE}, headers=headers)
         assert response.json()["inscription"] == {"numero_candidat": numero, "statut": "EN_ATTENTE", "deja_inscrit": True}
         # Le numéro fourni ne remplace pas un numéro existant
         response = anonymous.post(
-            "/api/partenaire/verifier",
-            json={"matricule": MATRICULE_ALICE, "numero_candidat": "AUTRE-1"}, headers=headers,
+            "/api/partenaire/inscrire", json={"matricule": MATRICULE_ALICE, "numero_candidat": "AUTRE-1"}, headers=headers
         )
         assert response.json()["inscription"]["numero_candidat"] == numero
         # Numéro fourni par le site officiel : enregistré à la première inscription
         response = anonymous.post(
-            "/api/partenaire/verifier",
-            json={"matricule": MATRICULE_BOB, "numero_candidat": "OFFICIEL-0042"}, headers=headers,
+            "/api/partenaire/inscrire", json={"matricule": MATRICULE_BOB, "numero_candidat": "OFFICIEL-0042"}, headers=headers
         )
         assert response.json()["inscription"] == {"numero_candidat": "OFFICIEL-0042", "statut": "EN_ATTENTE", "deja_inscrit": False}
+        # La vérification reflète maintenant l'inscription
+        assert anonymous.post("/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE}, headers=headers
+                              ).json()["inscription"]["numero_candidat"] == numero
         # Erreurs
-        unknown = anonymous.post("/api/partenaire/verifier", json={"matricule": "INCONNU"}, headers=headers)
+        unknown = anonymous.post("/api/partenaire/inscrire", json={"matricule": "INCONNU"}, headers=headers)
         assert unknown.status_code == 404
         assert unknown.json()["message"] == "Matricule non reconnus dans la base I-UPB."
-        assert anonymous.post("/api/partenaire/verifier", json={}, headers=headers).status_code == 400
-        assert anonymous.post("/api/partenaire/verifier", json={"matricule": "X" * 41}, headers=headers).status_code == 400
+        assert anonymous.post("/api/partenaire/inscrire", json={}, headers=headers).status_code == 400
+        assert anonymous.post("/api/partenaire/inscrire", json={"matricule": "X" * 41}, headers=headers).status_code == 400
         assert anonymous.post(
-            "/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE, "numero_candidat": "N" * 41}, headers=headers
+            "/api/partenaire/inscrire", json={"matricule": MATRICULE_ALICE, "numero_candidat": "N" * 41}, headers=headers
         ).status_code == 400
-        # Une clé désactivée est refusée
+        assert anonymous.post("/api/partenaire/verifier", json={"matricule": "INCONNU"}, headers=headers).status_code == 404
+        # Une clé désactivée est refusée (vérification comme inscription)
         with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
             conn.execute("UPDATE partenaire SET actif = FALSE WHERE nom = 'ZZTsite-officiel'")
             conn.commit()
-        assert anonymous.post(
-            "/api/partenaire/verifier", json={"matricule": MATRICULE_ALICE}, headers=headers
-        ).status_code == 401
+        for route in ("verifier", "inscrire"):
+            assert anonymous.post(
+                f"/api/partenaire/{route}", json={"matricule": MATRICULE_ALICE}, headers=headers
+            ).status_code == 401
     # L'étudiant apparaît inscrit côté admin, avec les statistiques
     for _ in range(3):  # les statistiques se dégradent (à 0) si Neon coupe une connexion : on retente
         after = client.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()
@@ -143,20 +158,21 @@ def test_full_flow(client):
     assert after["stats"]["inscrits"] >= 2
     # Plus de route publique d'inscription
     assert client.post("/api/inscrire", json={"matricule": MATRICULE_ALICE}).status_code in (404, 405)
+    assert client.post("/api/inscrire", json={"matricule": MATRICULE_ALICE}).status_code in (404, 405)
 
     # --- Demande de correction + validation admin ---
-    body = {"matricule": MATRICULE_ALICE, "telephone": "0707070707", "filiere": "ZZTEST Mines"}
+    body = {"matricule": MATRICULE_ALICE, "telephone": "0707070707", "filiere": "RIT"}
     assert client.post("/api/demander_modification", json=body).status_code == 201
     assert client.post("/api/demander_modification", json=body).status_code == 409
     pending = client.get("/api/admin_modifications").json()["data"]
     mine = [m for m in pending if m["matricule"] == MATRICULE_ALICE]
     assert len(mine) == 1
-    assert mine[0]["modifications"] == {"telephone": "0707070707", "filiere": "ZZTEST Mines"}
+    assert mine[0]["modifications"] == {"telephone": "0707070707", "filiere": "RIT"}
     assert isinstance(mine[0]["created_at"], str) and mine[0]["date_naissance"] == "1998-03-17"
     response = client.post("/api/admin_modifications", json={"id": mine[0]["id"], "action": "approve"})
     assert response.status_code == 200, response.text
     data = client.post("/api/verifier", json={"matricule": MATRICULE_ALICE}).json()["data"]
-    assert data["telephone"] == "0707070707" and data["filiere"] == "ZZTEST Mines"
+    assert data["telephone"] == "0707070707" and data["filiere"] == "RIT"
     assert client.post(
         "/api/admin_modifications", json={"id": mine[0]["id"], "action": "approve"}
     ).status_code == 404
@@ -191,9 +207,12 @@ def test_full_flow(client):
     assert response.status_code == 200
     assert response.json()["data"] == {}  # changer la date ne touche pas au matricule
     assert student(client, MATRICULE_ALICE)["date_naissance"] == "1998-03-18"
-    # Un matricule déjà attribué ne se modifie pas (identifiant)
+    # L'administrateur peut modifier le matricule (format et unicité contrôlés), puis le rétablir
     response = client.post("/api/update_etudiant", json={"id": beatrice, "matricule": "ZZTX0101000001"})
-    assert response.status_code == 422 and "déjà attribué" in response.json()["message"]
+    assert response.status_code == 200 and response.json()["data"] == {"matricule": "ZZTX0101000001"}
+    assert client.post("/api/verifier", json={"matricule": MATRICULE_ALICE}).status_code == 404
+    response = client.post("/api/update_etudiant", json={"id": beatrice, "matricule": MATRICULE_ALICE})
+    assert response.status_code == 200 and response.json()["data"] == {"matricule": MATRICULE_ALICE}
     response = client.post("/api/update_telephone", json={"id": beatrice, "telephone": "0505050505"})
     assert response.status_code == 200
     data = student(client, MATRICULE_ALICE)
@@ -217,7 +236,7 @@ def test_full_flow(client):
 
 
 def test_failed_import_rolls_back_valid_rows(client):
-    content = CSV + "Zztest;Chloé;31/02/1998;ZZTEST Génie;ZZTEST L1;;;\n"
+    content = CSV + "Zztest;Chloé;31/02/1998;ASSRI;Licence 1;;;\n"
     response = import_csv(client, content)
     assert response.status_code == 422
     assert response.json()["message"].startswith("Aucune ligne importée")
@@ -231,7 +250,7 @@ def test_unknown_matricule_creation_flow(client):
     # Le candidat renseigne ses informations -> demande en attente
     body = {
         "matricule": saisi, "nom": "Zztest", "prenoms": "Carole", "date_naissance": "05/06/2000",
-        "filiere": "ZZTEST Génie", "niveau": "ZZTEST L1", "email": "carole@exemple.ci",
+        "filiere": "ASSRI", "niveau": "Licence 1", "email": "carole@exemple.ci",
         "telephone": "0101010101", "sexe": "f", "allergies_affection": "Arachides",
     }
     response = client.post("/api/demander_creation", json=body)
@@ -256,7 +275,7 @@ def test_unknown_matricule_creation_flow(client):
         "/api/admin_creations", json={"id": pending[0]["id"], "action": "approve"}
     ).status_code == 404
     data = client.post("/api/verifier", json={"matricule": saisi}).json()["data"]
-    assert data["nom"] == "Zztest" and data["sexe"] == "F" and data["filiere"] == "ZZTEST Génie"
+    assert data["nom"] == "Zztest" and data["sexe"] == "F" and data["filiere"] == "ASSRI"
     assert data["allergies_affection"] == "Arachides" and data["date_naissance"] == "2000-06-05"
     # Le dossier existe maintenant : nouvelle demande refusée
     assert client.post("/api/demander_creation", json=body).status_code == 409
@@ -383,7 +402,7 @@ def test_approve_all_pending_requests(client):
     assert import_csv(client).status_code == 201
     for matricule, phone in ((MATRICULE_ALICE, "0111111111"), (MATRICULE_BOB, "0222222222")):
         assert client.post("/api/demander_modification", json={"matricule": matricule, "telephone": phone}).status_code == 201
-    carole = {"nom": "Zztest", "prenoms": "Carole", "date_naissance": "2000-06-05", "filiere": "ZZTEST Génie"}
+    carole = {"nom": "Zztest", "prenoms": "Carole", "date_naissance": "2000-06-05", "filiere": "ASSRI"}
     assert client.post("/api/demander_creation", json={"matricule": "ZZTC0506000001", **carole}).status_code == 201
     other = {**carole, "prenoms": "Carine"}
     assert client.post("/api/demander_creation", json={"matricule": "ZZTC0506000002", **other}).status_code == 201

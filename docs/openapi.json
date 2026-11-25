@@ -258,7 +258,7 @@
                       }
                     ],
                     "title": "Filiere",
-                    "description": "Vide = effacer."
+                    "description": "ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; vide = effacer."
                   },
                   "niveau": {
                     "anyOf": [
@@ -271,7 +271,7 @@
                       }
                     ],
                     "title": "Niveau",
-                    "description": "Vide = effacer."
+                    "description": "Licence 1, Licence 2 ou Licence 3 ; vide = effacer."
                   },
                   "telephone": {
                     "anyOf": [
@@ -617,8 +617,8 @@
         "tags": [
           "Administration"
         ],
-        "summary": "Modifier directement une fiche étudiant",
-        "description": "Modifie téléphone, e-mail, sexe, allergies/affections et/ou date de naissance (qui recalcule le matricule). Une chaîne vide efface le champ.",
+        "summary": "Modifier tous les champs d'une fiche étudiant",
+        "description": "Modifie n'importe quel champ : nom, prénoms, **matricule** (format et unicité contrôlés), date de naissance, filière, niveau, téléphone, e-mail, sexe, allergies/affections, et le numéro de candidat d'un étudiant déjà inscrit. Seuls les champs présents sont modifiés ; une chaîne vide efface un champ facultatif (nom et prénoms sont obligatoires). Le matricule n'est jamais recalculé.",
         "operationId": "update_student_api_update_etudiant_post",
         "requestBody": {
           "description": "Identifiant et champs à modifier.",
@@ -631,6 +631,78 @@
                     "minimum": 1.0,
                     "title": "Id",
                     "description": "Identifiant interne (champ `id` de `get_etudiants`)."
+                  },
+                  "nom": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Nom",
+                    "description": "Alphabet français uniquement ; obligatoire (non effaçable)."
+                  },
+                  "prenoms": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Prenoms",
+                    "description": "Alphabet français uniquement ; obligatoire (non effaçable)."
+                  },
+                  "matricule": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Matricule",
+                    "description": "Nouveau matricule (format `KOUA1703980001`, unique : `409` sinon). Vide : inchangé."
+                  },
+                  "date_naissance": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Date Naissance",
+                    "description": "`AAAA-MM-JJ` ou `JJ/MM/AAAA` ; vide : efface."
+                  },
+                  "filiere": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Filiere",
+                    "description": "ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; vide : efface."
+                  },
+                  "niveau": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Niveau",
+                    "description": "Licence 1, Licence 2 ou Licence 3 ; vide : efface."
                   },
                   "telephone": {
                     "anyOf": [
@@ -678,36 +750,26 @@
                     ],
                     "title": "Allergies Affection"
                   },
-                  "date_naissance": {
+                  "numero_candidat": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 40
                       },
                       {
                         "type": "null"
                       }
                     ],
-                    "title": "Date Naissance",
-                    "description": "`AAAA-MM-JJ` ou `JJ/MM/AAAA`. Ne modifie jamais le matricule."
-                  },
-                  "matricule": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Matricule",
-                    "description": "Attribue un matricule à un étudiant qui n'en a pas (format `KOUA1703980001`, unique : `409` sinon). Un matricule déjà attribué ne peut pas être modifié (`422`)."
+                    "title": "Numero Candidat",
+                    "description": "Modifie le numéro de candidat d'un étudiant déjà inscrit (`422` sinon)."
                   }
                 },
                 "type": "object",
                 "required": [
                   "id"
                 ],
-                "title": "UpdateStudentBody"
+                "title": "UpdateStudentBody",
+                "description": "Seuls les champs présents sont modifiés ; une chaîne vide efface un champ facultatif."
               }
             }
           },
@@ -895,16 +957,38 @@
         ]
       }
     },
+    "/api/referentiels": {
+      "get": {
+        "tags": [
+          "Portail étudiant"
+        ],
+        "summary": "Listes de filières et de niveaux",
+        "description": "Valeurs autorisées pour les champs `filiere` et `niveau` (import, formulaires, API). Route publique : les pages l'utilisent pour construire leurs listes déroulantes.",
+        "operationId": "referentiels_api_referentiels_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferentielsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/partenaire/verifier": {
       "post": {
         "tags": [
           "Partenaires"
         ],
-        "summary": "Vérifier un étudiant (et l'inscrire au concours si la clé y est autorisée)",
-        "description": "Réservé aux sites partenaires autorisés (en-tête `X-API-Key`). **Le matricule suffit** : le site n'a pas à demander d'autres informations à l'utilisateur. `verifie: true` confirme que le matricule existe (`404` sinon). La réponse renvoie l'identité de l'étudiant, **limitée aux champs autorisés pour ce partenaire** (un partenaire peut être limité au seul matricule).\n\nFacultatif : si le site a tout de même collecté `nom`, `prenoms` et/ou `date_naissance`, il peut les envoyer ; `correspondance` indique pour chacun s'il correspond au dossier, **sans révéler les valeurs** (utile pour confirmer une identité sans recevoir ces données).\n\n* Permission **VERIFICATION** : lecture seule. `inscription` indique si l'étudiant est déjà inscrit au concours (`null` sinon). Aucun marquage n'est effectué.\n* Permission **INSCRIPTION** : l'étudiant est **marqué inscrit au concours** s'il ne l'est pas encore. L'appel est idempotent. Si `numero_candidat` est fourni, il est enregistré à la première inscription ; sinon un numéro `GENIE-2026-XXXXX` est généré.\n\nErreurs d'accès : `401` clé absente, inconnue, révoquée, expirée ou partenaire désactivé ; `403` adresse IP non autorisée, ou `numero_candidat` fourni sans permission INSCRIPTION ; `429` quota d'appels par minute dépassé.",
+        "summary": "Vérifier un étudiant (lecture seule : n'inscrit jamais)",
+        "description": "Réservé aux sites partenaires autorisés (en-tête `X-API-Key`). **Le matricule suffit** : le site n'a pas à demander d'autres informations à l'utilisateur. `verifie: true` confirme que le matricule existe (`404` sinon). La réponse renvoie l'identité de l'étudiant, **limitée aux champs autorisés pour ce partenaire** (un partenaire peut être limité au seul matricule).\n\n**Cette route ne marque jamais l'étudiant comme inscrit**, quelle que soit la permission de la clé : `inscription` indique seulement s'il l'est déjà (`null` sinon). L'inscription se fait par `POST /api/partenaire/inscrire`, une fois le compte effectivement créé sur le site d'inscription.\n\nFacultatif : si le site a tout de même collecté `nom`, `prenoms` et/ou `date_naissance`, il peut les envoyer ; `correspondance` indique pour chacun s'il correspond au dossier, **sans révéler les valeurs** (utile pour confirmer une identité sans recevoir ces données).\n\nErreurs d'accès : `401` clé absente, inconnue, révoquée, expirée ou partenaire désactivé ; `403` adresse IP non autorisée ; `429` quota d'appels par minute dépassé.",
         "operationId": "partner_verify_api_partenaire_verifier_post",
         "requestBody": {
-          "description": "Matricule et numéro de candidat facultatif.",
+          "description": "Matricule (et, facultativement, nom, prénoms, date de naissance).",
           "content": {
             "application/json": {
               "schema": {
@@ -916,19 +1000,6 @@
                     "examples": [
                       "KOUA1703980001"
                     ]
-                  },
-                  "numero_candidat": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "maxLength": 40
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Numero Candidat",
-                    "description": "Numéro de candidat attribué par le site d'inscription ; enregistré à la première inscription (un numéro est généré s'il est absent)."
                   },
                   "nom": {
                     "anyOf": [
@@ -984,6 +1055,131 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PartnerVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Requête invalide (champ manquant, date mal formée…).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Jeton administrateur absent ou invalide.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Accès refusé (adresse IP non autorisée, ou action non permise pour cette clé).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ressource introuvable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Quota d'appels par minute dépassé.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur serveur ou base de données.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "PartnerApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/partenaire/inscrire": {
+      "post": {
+        "tags": [
+          "Partenaires"
+        ],
+        "summary": "Marquer un étudiant inscrit au concours (compte créé sur le site d'inscription)",
+        "description": "Réservé aux clés ayant la permission **INSCRIPTION** (`403` sinon). À appeler **uniquement quand le candidat a effectivement créé son compte** sur le site officiel d'inscription : une simple vérification (`/api/partenaire/verifier`) n'inscrit jamais.\n\nL'étudiant est marqué inscrit au concours s'il ne l'est pas encore ; l'appel est idempotent (le répéter ne crée pas de doublon et renvoie l'inscription existante, `deja_inscrit: true`). Si `numero_candidat` est fourni, il est enregistré à la première inscription ; sinon un numéro `GENIE-2026-XXXXX` est généré. Un numéro fourni ensuite ne remplace jamais le numéro existant.\n\nErreurs : `400` matricule absent ou `numero_candidat` invalide ; `401` clé invalide ; `403` permission ou adresse IP non autorisée ; `404` matricule inconnu ; `429` quota dépassé.",
+        "operationId": "partner_register_api_partenaire_inscrire_post",
+        "requestBody": {
+          "description": "Matricule et numéro de candidat facultatif.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "matricule": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "title": "Matricule",
+                    "examples": [
+                      "KOUA1703980001"
+                    ]
+                  },
+                  "numero_candidat": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 40
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Numero Candidat",
+                    "description": "Numéro de candidat attribué par le site d'inscription ; enregistré à la première inscription (un numéro est généré s'il est absent)."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "matricule"
+                ],
+                "title": "PartnerRegisterBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Étudiant inscrit (ou déjà inscrit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerRegisterResponse"
                 }
               }
             }
@@ -2132,7 +2328,7 @@
           "Administration"
         ],
         "summary": "Importer des étudiants depuis un CSV",
-        "description": "Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, séparateur `,` ou `;`). **Seules les colonnes `nom` et `prenoms` sont obligatoires.** Facultatives : `matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, `allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel (format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; sinon l'étudiant est créé sans matricule, à renseigner ensuite. Sans matricule, un homonyme exact déjà présent (même date de naissance, ou date inconnue) est refusé comme doublon. Les noms et prénoms n'acceptent que les lettres de l'alphabet français, espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). Tout ou rien : une erreur annule l'import.",
+        "description": "Champ multipart `fichier` (.csv, UTF-8, 5 Mo et 5 000 lignes maximum, séparateur `,` ou `;`). **Seules les colonnes `nom` et `prenoms` sont obligatoires.** Facultatives : `matricule`, `date_naissance`, `filiere`, `niveau`, `telephone`, `email`, `sexe`, `allergies_affection`. Le matricule n'est jamais calculé : s'il est fourni, il est importé tel quel (format 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres, ex. `KOUA1703980001`, et unique) ; sinon l'étudiant est créé sans matricule, à renseigner ensuite. Sans matricule, un homonyme exact déjà présent (même date de naissance, ou date inconnue) est refusé comme doublon. Les noms et prénoms n'acceptent que les lettres de l'alphabet français, espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). `filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : Licence 1, Licence 2 ou Licence 3 (casse et espaces ignorés) ; toute autre valeur est une erreur de ligne. Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). Tout ou rien : une erreur annule l'import.",
         "operationId": "import_students_api_import_etudiants_post",
         "requestBody": {
           "content": {
@@ -2414,6 +2610,315 @@
           },
           "401": {
             "description": "Jeton administrateur absent ou invalide.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur serveur ou base de données.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Jeton administrateur non configuré côté serveur.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin_etudiants": {
+      "post": {
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Créer un étudiant",
+        "description": "Création directe d'un dossier par un administrateur. **Seuls `nom` et `prenoms` sont obligatoires.** Matricule facultatif : s'il est fourni, il est contrôlé (format) et doit être unique (`409`) ; sans matricule, un homonyme exact déjà présent (même date de naissance, ou date inconnue) est refusé (`409`). Noms et prénoms : alphabet français uniquement. Filière (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveau (Licence 1, 2 ou 3) : listes fermées.",
+        "operationId": "create_student_api_admin_etudiants_post",
+        "requestBody": {
+          "description": "Fiche du nouvel étudiant.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "nom": {
+                    "type": "string",
+                    "title": "Nom",
+                    "examples": [
+                      "Kouadio"
+                    ]
+                  },
+                  "prenoms": {
+                    "type": "string",
+                    "title": "Prenoms",
+                    "examples": [
+                      "Alain"
+                    ]
+                  },
+                  "matricule": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Matricule",
+                    "description": "Facultatif : `KOUA1703980001` (format et unicité contrôlés)."
+                  },
+                  "date_naissance": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Date Naissance"
+                  },
+                  "filiere": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Filiere"
+                  },
+                  "niveau": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Niveau"
+                  },
+                  "telephone": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Telephone"
+                  },
+                  "email": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Email"
+                  },
+                  "sexe": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Sexe",
+                    "description": "`M` ou `F`."
+                  },
+                  "allergies_affection": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Allergies Affection"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "nom",
+                  "prenoms"
+                ],
+                "title": "StudentCreateBody",
+                "description": "Création d'un étudiant par un administrateur : seuls nom et prénoms sont obligatoires."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentCreatedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Jeton administrateur absent ou invalide.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflit (déjà existant).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation métier échouée.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur serveur ou base de données.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Jeton administrateur non configuré côté serveur.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin_desinscrire": {
+      "post": {
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Désinscrire un étudiant du concours",
+        "description": "Supprime l'inscription au concours (numéro de candidat) de l'étudiant. Le dossier étudiant et l'historique de pointage sont conservés. `404` si l'étudiant n'est pas inscrit. Le site d'inscription peut ensuite l'inscrire de nouveau (`/api/partenaire/inscrire`).",
+        "operationId": "unregister_student_api_admin_desinscrire_post",
+        "requestBody": {
+          "description": "Identifiant de l'étudiant.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1.0,
+                    "title": "Id",
+                    "description": "Identifiant interne de l'étudiant (champ `id` de `get_etudiants`)."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "title": "UnregisterBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Requête invalide (champ manquant, date mal formée…).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Jeton administrateur absent ou invalide.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ressource introuvable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4569,6 +5074,36 @@
         ],
         "title": "PartnerKeyResponse"
       },
+      "PartnerRegisterResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "success",
+            "title": "Status",
+            "default": "success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data",
+            "description": "Données de l'étudiant, limitées aux champs autorisés pour ce partenaire."
+          },
+          "inscription": {
+            "$ref": "#/components/schemas/PartnerRegistration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "data",
+          "inscription"
+        ],
+        "title": "PartnerRegisterResponse"
+      },
       "PartnerRegistration": {
         "properties": {
           "numero_candidat": {
@@ -4767,7 +5302,7 @@
                 "type": "null"
               }
             ],
-            "description": "Inscription au concours ; `null` si l'étudiant n'est pas inscrit et que la clé n'a pas la permission INSCRIPTION."
+            "description": "Inscription au concours ; `null` si l'étudiant n'est pas inscrit. La vérification n'inscrit jamais."
           }
         },
         "type": "object",
@@ -4913,6 +5448,77 @@
           "date_naissance"
         ],
         "title": "PendingModification"
+      },
+      "ReferentielsResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "success",
+            "title": "Status",
+            "default": "success"
+          },
+          "filieres": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filieres",
+            "examples": [
+              [
+                "ASSRI",
+                "RIT",
+                "MIAGE",
+                "SEG",
+                "SEA",
+                "SJAP",
+                "3EA"
+              ]
+            ]
+          },
+          "niveaux": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Niveaux",
+            "examples": [
+              [
+                "Licence 1",
+                "Licence 2",
+                "Licence 3"
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "filieres",
+          "niveaux"
+        ],
+        "title": "ReferentielsResponse"
+      },
+      "StudentCreatedResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "success",
+            "title": "Status",
+            "default": "success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminStudent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "data"
+        ],
+        "title": "StudentCreatedResponse"
       },
       "StudentRecord": {
         "properties": {

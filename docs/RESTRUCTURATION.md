@@ -422,7 +422,7 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
 - **Étudiant sans matricule** : `migrations/09_matricule_facultatif.sql` (colonne `etudiant.matricule` nullable, la
   contrainte UNIQUE est conservée). L'administrateur l'attribue ensuite dans la liste (champ « À renseigner ») :
   `POST /api/update_etudiant` accepte `matricule` (format, unicité `409`) pour un étudiant qui n'en a pas ; un
-  matricule déjà attribué n'est pas modifiable (`422`). Sans matricule, l'étudiant est introuvable par le portail
+  matricule déjà attribué n'est plus modifiable (`422`) *[remplacé à l'étape 18 : l'administrateur peut désormais modifier le matricule]*. Sans matricule, l'étudiant est introuvable par le portail
   et les intégrations.
 - **Modèle** `frontend/modele_import_etudiants.csv` : colonne `matricule` ajoutée, exemples avec et sans matricule.
 - **Tests** : `tests/test_import_rules.py` réécrit : chaque colonne facultative absente / vide / renseignée,
@@ -444,3 +444,46 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   `GET /api/sante?base=1` répond 503 avec `migrations_manquantes` si la base est en retard ; au démarrage, le journal de
   Render écrit « SCHÉMA DE BASE OBSOLÈTE » (contrôle en tâche de fond, sans retarder le démarrage).
 - **Correctif de production** : appliquer les migrations sur la base de production (guide de déploiement, étape 1).
+
+## Étape 18 — Administration complète des étudiants ; la vérification n'inscrit plus
+
+- **Modifier tous les champs** (`POST /api/update_etudiant`) : nom, prénoms (alphabet français), **matricule** (désormais
+  modifiable par l'admin : format + unicité `409`, jamais recalculé), date de naissance, filière, niveau (créés au besoin),
+  téléphone, e-mail, sexe, allergies, et numéro de candidat d'un étudiant inscrit. Une chaîne vide efface un champ
+  facultatif (nom et prénoms restent obligatoires) ; une date vide l'efface (avant : ignorée).
+- **Créer un étudiant** (`POST /api/admin_etudiants`) : seuls nom et prénoms obligatoires ; matricule facultatif (format +
+  unicité) ; sans matricule, un homonyme exact est refusé (`409`). Bouton « Nouvel étudiant » dans la page admin.
+- **Désinscrire** (`POST /api/admin_desinscrire`) : supprime la ligne `candidat_concours` ; le dossier et les pointages sont
+  conservés ; `404` si non inscrit. Bouton « Désinscrire » dans la liste (avec confirmation). Un bouton « Modifier » ouvre
+  la fenêtre d'édition de tous les champs ; l'enregistrement rapide de la liste (téléphone, e-mail, sexe, naissance) reste.
+- **La vérification n'inscrit plus jamais** : `POST /api/partenaire/verifier` est en lecture seule pour toutes les clés
+  (`inscription` indique seulement l'état actuel ; `numero_candidat` y est refusé, `400`). Nouvel appel
+  `POST /api/partenaire/inscrire` (permission « Vérification et inscription », `403` sinon), idempotent, que le site
+  officiel appelle **uniquement quand le compte est effectivement créé**. **Changement incompatible** pour une
+  intégration qui comptait sur `verifier` pour inscrire : elle doit appeler `inscrire`.
+- Journal : `ETUDIANT_CREE`, `ETUDIANT_DESINSCRIT` ; la vérification partenaire est toujours `VERIFICATION_PARTENAIRE`,
+  l'inscription `INSCRIPTION_CONCOURS`. Textes de l'onglet Intégrations et guide d'intégration mis à jour.
+- Tests : `tests/test_admin_students.py` (création, validations, doublons, édition et effacement de chaque champ,
+  conflits, numéro de candidat, désinscription, réinscription par le site, traçabilité) ; tests partenaires,
+  journal et flux de base adaptés.
+
+## Étape 19 — Listes déroulantes fermées : filière et niveau
+
+- **Valeurs autorisées** (source unique : `FILIERES` et `NIVEAUX` dans `backend/app/student_rules.py`) :
+  filière = ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA ; niveau = Licence 1, Licence 2, Licence 3. La comparaison ignore
+  la casse et les espaces (`assri` → `ASSRI`, `licence3` → `Licence 3`) et enregistre toujours la forme canonique.
+  Vide = « non précisé ». Aucun changement de schéma (pas de nouvelle migration).
+- **Nouvelle route publique** `GET /api/referentiels` : renvoie `filieres` et `niveaux` ; les pages l'utilisent
+  pour construire leurs listes (valeurs de repli identiques dans le code des pages si l'API tarde).
+- **Validation partout** (erreur 422 « Filière non reconnue … Valeurs autorisées : … ») : import CSV (erreur de
+  ligne, tout-ou-rien), demande de création et demande de correction candidat, approbation admin de ces demandes,
+  création d'étudiant par l'admin, modification par l'admin.
+- **Données historiques** : un étudiant dont la filière ou le niveau est hors liste n'est ni bloqué ni effacé. Une
+  valeur hors liste renvoyée *inchangée* par un formulaire est tolérée ; la remplacer par une autre valeur hors liste
+  est refusé.
+- **Frontend** : nouveau composant `frontend/upb-select.js` (liste déroulante au design du site, clavier et
+  lecteurs d'écran : combobox/listbox, flèches, Début/Fin, Échap), qui remplace les champs libres du portail
+  (`index.html`) et de la fenêtre étudiant de l'administration (`admin.html`). Le `<select>` natif reste dans le DOM.
+  Modèle d'import et aide de l'import mis à jour avec les valeurs de la liste.
+- Tests : `tests/test_referentiels.py` (règles, route, pages et composant, modèle, import, flux candidat et admin,
+  valeurs historiques). **À faire côté déploiement** : redéployer le backend (Render) et le frontend (Netlify).

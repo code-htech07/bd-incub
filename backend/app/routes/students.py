@@ -11,8 +11,9 @@ from .. import audit
 from ..auth import require_admin
 from ..db import Database, get_db
 from ..errors import ApiError, respond
-from ..student_rules import validate_matricule, validate_name
+from ..student_rules import FILIERES, NIVEAUX, REFERENCE_VALIDATORS, validate_matricule, validate_name
 from ..student_helpers import (
+    lookup_reference_id,
     byte_length,
     parse_student_date,
     valid_email,
@@ -92,8 +93,11 @@ def verify_student(body: Any = Depends(json_body), db: Database = Depends(get_db
     )
 
 
-def _validated_fields(data: dict) -> dict[str, Any]:
-    """Valide et nettoie les champs de dossier présents dans `data`."""
+def _validated_fields(data: dict, check_reference: bool = True) -> dict[str, Any]:
+    """Valide et nettoie les champs de dossier présents dans `data`.
+
+    `check_reference=False` : filière et niveau ne sont pas encore comparés aux listes (la correction d'un
+    dossier existant tolère une valeur historique inchangée ; voir `request_modification`)."""
     changes: dict[str, Any] = {}
     for field in EDITABLE_FIELDS:
         if field not in data:
@@ -122,6 +126,11 @@ def _validated_fields(data: dict) -> dict[str, Any]:
         elif field in ("filiere", "niveau"):
             if byte_length(value) > 150:
                 raise ApiError(422, f"Le champ {field} est trop long.")
+            if check_reference:
+                try:
+                    value = REFERENCE_VALIDATORS[field](value) or ""
+                except ValueError as error:
+                    raise ApiError(422, str(error))
             changes[field] = value or None
         elif field == "email":
             if not valid_email(value):
@@ -162,7 +171,7 @@ def request_modification(
         raise ApiError(400, "Matricule requis.")
     audit.annotate(target_type="matricule", target=data["matricule"].strip().upper())
 
-    changes = _validated_fields(data)
+    changes = _validated_fields(data, check_reference=False)
     audit.annotate(champs=sorted(changes))
     if not changes:
         raise ApiError(422, "Aucune modification proposée.")
@@ -185,6 +194,16 @@ def request_modification(
                 student = cursor.fetchone()
                 if not student:
                     raise ApiError(404, "Matricule non reconnu.")
+
+                # Filière et niveau : listes fermées. Une valeur historique hors liste, renvoyée telle quelle
+                # par le formulaire, n'est pas une modification et reste tolérée.
+                for field, validator in REFERENCE_VALIDATORS.items():
+                    if changes.get(field):
+                        try:
+                            changes[field] = validator(changes[field])
+                        except ValueError as error:
+                            if changes[field] != student.get(field):
+                                raise ApiError(422, str(error))
 
                 different = {
                     field: value
@@ -282,9 +301,11 @@ def request_creation(body: Any = Depends(json_body), db: Database = Depends(get_
     "/api/update_etudiant",
     dependencies=[Depends(require_admin)],
     tags=["Administration"],
-    summary="Modifier directement une fiche étudiant",
-    description="Modifie téléphone, e-mail, sexe, allergies/affections et/ou date de "
-    "naissance (qui recalcule le matricule). Une chaîne vide efface le champ.",
+    summary="Modifier tous les champs d'une fiche étudiant",
+    description="Modifie n'importe quel champ : nom, prénoms, **matricule** (format et unicité contrôlés), "
+    "date de naissance, filière, niveau, téléphone, e-mail, sexe, allergies/affections, et le numéro de "
+    "candidat d'un étudiant déjà inscrit. Seuls les champs présents sont modifiés ; une chaîne vide efface "
+    "un champ facultatif (nom et prénoms sont obligatoires). Le matricule n'est jamais recalculé.",
     response_model=None,
     responses={
         200: {"description": "Fiche mise à jour ; `data.matricule` si le matricule a changé."},
@@ -301,107 +322,141 @@ def update_student(body: Any = Depends(json_body), db: Database = Depends(get_db
         raise ApiError(400, "Données incomplètes.")
     audit.annotate(target_type="etudiant", target=str(student_id))
 
-    editable = {
-        "telephone": "str",
-        "email": "email",
-        "sexe": "sexe",
-        "allergies_affection": "allergies",
-    }
     assignments: list[str] = []
     parameters: list[Any] = []
-    for field, field_type in editable.items():
+    changed: list[str] = []
+
+    for field, field_type in {
+        "telephone": "str", "email": "email", "sexe": "sexe", "allergies_affection": "allergies",
+    }.items():
         if field not in data:
             continue
         value = data[field]
+        if value is None:
+            value = ""
         if not isinstance(value, str):
             raise ApiError(422, f"Valeur invalide pour {field}.")
         value = value.strip()
+        if field == "telephone" and byte_length(value) > 40:
+            raise ApiError(422, "Le champ telephone est trop long.")
         if value and field_type == "email" and not valid_email(value):
             raise ApiError(422, "Adresse e-mail invalide.")
-        if field_type == "sexe" and value and value not in ("M", "F"):
-            raise ApiError(422, "Sexe invalide (M ou F).")
+        if field_type == "sexe":
+            value = value.upper()
+            if value and value not in ("M", "F"):
+                raise ApiError(422, "Sexe invalide (M ou F).")
         if field_type == "allergies" and byte_length(value) > 2000:
             raise ApiError(422, "Le champ allergies/affections est trop long.")
         assignments.append(f"{field} = %s")
         parameters.append(value or None)
+        changed.append(field)
 
-    # Date de naissance et matricule : le matricule n'est JAMAIS recalculé. Il peut seulement être
-    # attribué à un étudiant qui n'en a pas encore (import sans matricule) ; un matricule existant
-    # est un identifiant et ne se modifie pas.
+    for field, label in (("nom", "Nom"), ("prenoms", "Prénoms")):
+        if field in data:
+            try:
+                value = validate_name(data[field], label)
+            except ValueError as error:
+                raise ApiError(422, str(error))
+            assignments.append(f"{field} = %s")
+            parameters.append(value)
+            changed.append(field)
+
+    if "date_naissance" in data:
+        raw = data["date_naissance"]
+        if raw is None or raw == "":
+            birth_date = None  # efface la date
+        elif not isinstance(raw, str) or not (birth_date := parse_student_date(raw)):
+            raise ApiError(422, "Date de naissance invalide.")
+        assignments.append("date_naissance = %s")
+        parameters.append(birth_date)
+        changed.append("date_naissance")
+
+    labels: dict[str, str | None] = {}
+    for field in ("filiere", "niveau"):
+        if field in data:
+            value = data[field]
+            if value is not None and not isinstance(value, str):
+                raise ApiError(422, f"Valeur invalide pour {field}.")
+            value = (value or "").strip()
+            if byte_length(value) > 150:
+                raise ApiError(422, f"Le champ {field} est trop long.")
+            labels[field] = value or None
+            changed.append(field)
+
     new_matricule = None
-    same_matricule = False
-    raw_birth = data.get("date_naissance")
-    raw_matricule = data.get("matricule")
-    birth_date = None
-    if raw_birth is not None and raw_birth != "":
-        if not isinstance(raw_birth, str):
-            raise ApiError(422, "Date de naissance invalide.")
-        birth_date = parse_student_date(raw_birth)
-        if not birth_date:
-            raise ApiError(422, "Date de naissance invalide.")
-    if raw_matricule is not None and raw_matricule != "":
+    if data.get("matricule") not in (None, ""):
         try:
-            new_matricule = validate_matricule(raw_matricule)
+            new_matricule = validate_matricule(data["matricule"])
         except ValueError as error:
             raise ApiError(422, str(error))
-    if birth_date or new_matricule:
-        try:
-            with db.cursor() as cursor:
-                cursor.execute(
-                    "SELECT matricule, date_naissance FROM etudiant WHERE id = %s", (student_id,)
-                )
-                student = cursor.fetchone()
-                if not student:
-                    raise ApiError(404, "Étudiant introuvable.")
-                if new_matricule:
-                    if student["matricule"] and student["matricule"] != new_matricule:
-                        raise ApiError(
-                            422, "Le matricule est déjà attribué et ne peut pas être modifié."
-                        )
-                    if student["matricule"] == new_matricule:
-                        new_matricule = None  # déjà le sien : rien à faire
-                        same_matricule = True
-                    else:
-                        cursor.execute(
-                            "SELECT id FROM etudiant WHERE matricule = %s AND id <> %s",
-                            (new_matricule, student_id),
-                        )
-                        if cursor.fetchone():
-                            raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
-                        assignments.append("matricule = %s")
-                        parameters.append(new_matricule)
-                if birth_date and birth_date != str(student["date_naissance"]):
-                    assignments.append("date_naissance = %s")
-                    parameters.append(birth_date)
-        except psycopg.Error:
-            logger.exception("Lecture étudiant avant mise à jour UPB")
-            raise ApiError(500, "Erreur lors de la lecture du dossier étudiant.")
 
-    if not assignments:
-        if same_matricule:  # le matricule demandé est déjà celui de l'étudiant : succès sans effet
-            return respond(200, {"status": "success", "message": "Fiche inchangée.", "data": {}})
+    new_number = None
+    if "numero_candidat" in data:
+        number = data["numero_candidat"]
+        if not isinstance(number, str) or not number.strip() or len(number.strip()) > 40:
+            raise ApiError(422, "Numéro de candidat invalide (1 à 40 caractères).")
+        new_number = number.strip()
+        changed.append("numero_candidat")
+
+    if new_matricule:
+        changed.append("matricule")
+    if not (assignments or labels or new_matricule or new_number):
         raise ApiError(400, "Données incomplètes.")
 
+    matricule_changed = False
     try:
         with db.transaction():
             with db.cursor() as cursor:
                 cursor.execute(
-                    f"UPDATE etudiant SET {', '.join(assignments)} WHERE id = %s",
-                    (*parameters, student_id),
+                    "SELECT e.matricule, f.libelle AS filiere, n.libelle AS niveau FROM etudiant e "
+                    "LEFT JOIN filiere f ON e.filiere_id = f.id LEFT JOIN niveau n ON e.niveau_id = n.id "
+                    "WHERE e.id = %s FOR UPDATE OF e",
+                    (student_id,),
                 )
+                student = cursor.fetchone()
+                if not student:
+                    raise ApiError(404, "Étudiant introuvable.")
+                if new_matricule and new_matricule != student["matricule"]:
+                    cursor.execute(
+                        "SELECT id FROM etudiant WHERE matricule = %s AND id <> %s", (new_matricule, student_id)
+                    )
+                    if cursor.fetchone():
+                        raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
+                    assignments.append("matricule = %s")
+                    parameters.append(new_matricule)
+                    matricule_changed = True
+                for field, label in labels.items():
+                    if label:
+                        try:
+                            label = REFERENCE_VALIDATORS[field](label)
+                        except ValueError as error:
+                            if label != student[field]:  # valeur historique inchangée : tolérée
+                                raise ApiError(422, str(error))
+                    assignments.append(f"{field}_id = %s")
+                    parameters.append(lookup_reference_id(cursor, field, label) if label else None)
+                if new_number:
+                    cursor.execute(
+                        "UPDATE candidat_concours SET numero_candidat = %s WHERE etudiant_id = %s",
+                        (new_number, student_id),
+                    )
+                    if cursor.rowcount == 0:
+                        raise ApiError(422, "Cet étudiant n'est pas inscrit au concours : pas de numéro de candidat.")
+                if assignments:
+                    cursor.execute(
+                        f"UPDATE etudiant SET {', '.join(assignments)} WHERE id = %s", (*parameters, student_id)
+                    )
+    except psycopg.errors.UniqueViolation:
+        raise ApiError(409, "Ce matricule existe déjà pour un autre étudiant.")
     except psycopg.Error:
         logger.exception("Mise à jour étudiant UPB")
         raise ApiError(500, "Erreur de base de données.")
-    audit.annotate(
-        champs=[a.split(" = ")[0] for a in assignments],
-        matricule_attribue=bool(new_matricule),
-    )
+    audit.annotate(champs=sorted(set(changed)), matricule_modifie=matricule_changed)
     return respond(
         200,
         {
             "status": "success",
-            "message": "Fiche étudiant mise à jour avec succès !",
-            "data": {"matricule": new_matricule} if new_matricule else {},
+            "message": "Fiche étudiant mise à jour avec succès !" if (assignments or new_number) else "Fiche inchangée.",
+            "data": {"matricule": new_matricule} if matricule_changed else {},
         },
     )
 
@@ -435,3 +490,16 @@ def update_telephone(body: Any = Depends(json_body), db: Database = Depends(get_
         logger.exception("Mise à jour du téléphone UPB")
         raise ApiError(500, "Erreur de base de données.")
     return respond(200, {"status": "success", "message": "Téléphone mis à jour avec succès !"})
+
+
+@router.get(
+    "/api/referentiels",
+    tags=["Portail étudiant"],
+    summary="Listes de filières et de niveaux",
+    description="Valeurs autorisées pour les champs `filiere` et `niveau` (import, formulaires, API). "
+    "Route publique : les pages l'utilisent pour construire leurs listes déroulantes.",
+    response_model=None,
+    responses={200: {"model": d.ReferentielsResponse}},
+)
+def referentiels():
+    return respond(200, {"status": "success", "filieres": list(FILIERES), "niveaux": list(NIVEAUX)})

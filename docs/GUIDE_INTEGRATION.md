@@ -29,7 +29,7 @@ votre site :
 
 | Réglage | Effet |
 |---|---|
-| **Permission** | *Vérification seule* : lit l'identité, ne modifie rien. *Vérification et inscription* : marque aussi l'étudiant inscrit au concours (réservé au site officiel d'inscription). |
+| **Permission** | *Vérification seule* : lit l'identité, ne modifie rien. *Vérification et inscription* : peut aussi marquer l'étudiant inscrit au concours par l'appel `/api/partenaire/inscrire` (réservé au site officiel d'inscription, une fois le compte créé). |
 | **Données transmises** | Les champs de l'étudiant que vous recevez. Un accès peut être limité au **seul matricule** : vous savez alors seulement si l'étudiant existe. |
 | **Adresses IP autorisées** | Si renseignées, seuls vos serveurs (adresses ou réseaux CIDR listés) peuvent utiliser la clé. |
 | **Quota** | Nombre d'appels par minute. |
@@ -108,18 +108,24 @@ correspondent au dossier, **sans révéler les valeurs du dossier** :
 
 ## 4. Inscription au concours (site officiel uniquement)
 
-Avec la permission **Vérification et inscription**, le même appel **marque l'étudiant
-inscrit au concours** s'il ne l'est pas encore. Il doit donc être fait **une fois
-l'inscription validée côté site officiel**. L'appel est idempotent : le répéter ne
-crée pas de doublon. `numero_candidat` est facultatif.
+**La vérification (§2 et §3) n'inscrit jamais un étudiant**, quelle que soit la permission de la clé. Un
+étudiant n'est marqué inscrit au concours que par un appel distinct, que le site officiel d'inscription
+fait **uniquement quand le candidat a effectivement créé son compte** :
 
-```json
+```
+POST {BASE_URL}/api/partenaire/inscrire
+X-API-Key: upb_xxxxxxxxxxxxxxxx
+Content-Type: application/json
+
 {"matricule": "KOUA1703980001", "numero_candidat": "OFFICIEL-0042"}
 ```
 
+Cet appel exige la permission **Vérification et inscription** (`403` sinon). `numero_candidat` est
+facultatif. L'appel est idempotent : le répéter ne crée pas de doublon.
+
 ```json
-{ "status": "success", "message": "Étudiant vérifié et inscrit au concours.", "verifie": true,
-  "correspondance": null, "data": { "matricule": "KOUA1703980001" },
+{ "status": "success", "message": "Étudiant inscrit au concours.",
+  "data": { "matricule": "KOUA1703980001" },
   "inscription": { "numero_candidat": "OFFICIEL-0042", "statut": "EN_ATTENTE", "deja_inscrit": false } }
 ```
 
@@ -127,7 +133,10 @@ crée pas de doublon. `numero_candidat` est facultatif.
   est généré). Un numéro fourni ensuite ne remplace jamais celui déjà enregistré :
   c'est celui renvoyé qui fait foi.
 - `deja_inscrit: true` : l'étudiant était déjà inscrit avant l'appel.
-- Envoyer `numero_candidat` sans cette permission renvoie `403`.
+- La vérification (`/api/partenaire/verifier`) indique seulement si l'étudiant est déjà inscrit
+  (`inscription` non nul). Lui envoyer `numero_candidat` renvoie `400`.
+- Un administrateur peut désinscrire un étudiant depuis son tableau de bord ; le site d'inscription peut
+  ensuite l'inscrire de nouveau avec le même appel.
 
 ---
 
@@ -152,7 +161,7 @@ matricule n'a pas encore été attribué n'est pas vérifiable.
 | `200` | Matricule trouvé (`verifie: true`) | Poursuivre |
 | `400` | `matricule` absent, vide, non textuel ou > 40 caractères ; champ facultatif mal typé | Corriger la requête |
 | `401` | Clé absente, inconnue, révoquée, expirée, ou intégration désactivée | Vérifier la clé ; contacter l'administrateur |
-| `403` | Adresse IP non autorisée pour cette clé, ou `numero_candidat` sans permission d'inscription | Appeler depuis un serveur autorisé |
+| `403` | Adresse IP non autorisée pour cette clé, ou appel d'`inscrire` sans la permission d'inscription | Appeler depuis un serveur autorisé / demander la permission |
 | `404` | Matricule inconnu (`Matricule non reconnus dans la base I-UPB.`) | Refuser la vérification |
 | `429` | Quota d'appels par minute dépassé | Attendre le délai indiqué dans le message |
 | `500` | Erreur serveur ou base de données | Ne pas conclure ; réessayer plus tard |

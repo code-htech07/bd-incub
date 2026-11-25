@@ -587,3 +587,15 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   `inchanges`). Aide de la page et du modèle CSV mises à jour. Aucun changement de schéma.
 - Remplace le comportement des étapes 15–16 « homonyme exact sans matricule refusé comme doublon ».
 - Tests : `tests/test_import_update.py` ; `test_import_rules.py` et `test_db_flow.py` adaptés.
+
+## Étape 24 — Portail : fin de l'envoi d'une demande (animation du bouton et formulaire)
+
+- **Défaut corrigé** : après un envoi réussi, le bouton était désactivé et le code final ne retirait alors pas la classe
+  `loading` : le cercle tournait indéfiniment. Les informations saisies restaient aussi à l'écran.
+- **Maintenant** (`frontend/index.html`, `genie.css`) : à la réponse `201`, le cercle s'arrête, le bouton devient vert
+  « ✓ Demande envoyée » (désactivé), le formulaire est **vidé et masqué** (ainsi que la fiche du dossier affichée), le champ
+  matricule est vidé, les deux étapes passent à « ✓ » et seul le message de confirmation (avec le délai de 12 h) reste. Une
+  nouvelle vérification de matricule réaffiche le formulaire et un bouton normal. En cas d'erreur, le bouton redevient actif
+  et les informations saisies sont conservées pour permettre de corriger.
+- Vérifié dans Edge (serveur simulé) : pendant l'envoi `loading` ; après, `sent`, champs vides, formulaire masqué ; nouvelle
+  vérification : formulaire et bouton restaurés. Test : `tests/test_mail_and_names.py`.

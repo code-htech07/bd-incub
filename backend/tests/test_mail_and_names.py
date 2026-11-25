@@ -440,3 +440,20 @@ def test_decision_500_names_the_missing_migration(client, monkeypatch):
     monkeypatch.setattr(database.Database, "transaction", lambda *a, **k: (_ for _ in ()).throw(psycopg.errors.DeadlockDetected("x")))
     response = client.post("/api/admin_creations", json={"id": 1, "action": "approve"})
     assert response.status_code == 500 and response.json()["message"] == "Erreur lors du traitement de la demande."
+
+
+# ------------------------------------------------------------------ portail : fin de l'envoi
+def test_portal_submit_button_stops_spinning_and_the_form_is_cleared():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "frontend"
+    page = (root / "index.html").read_text(encoding="utf-8")
+    css = (root / "genie.css").read_text(encoding="utf-8")
+    start = page.index("function envoiTermine(btn)")
+    body = page[start:page.index("function secouer", start)]
+    # La classe qui fait tourner le cercle est retirée, le bouton passe à « envoyé », le formulaire est vidé
+    assert "classList.remove('loading')" in body and "classList.add('sent')" in body and "viderFormulaire()" in body
+    assert "if (response.ok) {\n                    envoiTermine(btn);" in page
+    assert ".btn.sent" in css and ".btn.loading::before" in css
+    # Une nouvelle vérification restaure le formulaire et le bouton
+    reset = page[page.index("function definirMode"):page.index("function setStep")]
+    assert "classList.remove('sent', 'loading')" in reset and "profile-fields')" in reset

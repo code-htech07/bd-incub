@@ -162,9 +162,12 @@
         function definirMode(creation) {
             modeCreation = creation;
             const btn = $('btn-modifs');
+            btn.classList.remove('sent', 'loading');
             btn.textContent = creation ? TXT_CREATION : TXT_MODIFS;
             btn.dataset.txt = btn.textContent;
             btn.disabled = false;
+            document.querySelector('#section-inscription .profile-fields').classList.remove('hidden');
+            $('section-sub').classList.remove('hidden');
             $('section-sub').textContent = creation
                 ? "Votre matricule n'a pas été trouvé. Renseignez vos informations : votre dossier sera créé uniquement après validation par un administrateur."
                 : "Vérifiez votre dossier. Toute correction sera appliquée uniquement après validation par un administrateur.";
@@ -185,6 +188,23 @@
             btn.classList.toggle('loading', on);
             if (texte) btn.dataset.txt = btn.dataset.txt || btn.textContent;
             btn.textContent = on ? texte : (btn.dataset.txt || btn.textContent);
+        }
+
+        // Envoi réussi : le cercle s'arrête, le bouton passe en « envoyé », le formulaire est vidé et masqué
+        // (aucune donnée personnelle ne reste à l'écran). Une nouvelle vérification de matricule le réaffiche.
+        function envoiTermine(btn) {
+            viderFormulaire();
+            document.querySelector('#section-inscription .profile-fields').classList.add('hidden');
+            $('section-sub').classList.add('hidden');
+            $('resultat-verification').innerHTML = '';
+            $('matricule').value = '';
+            matriculeActuel = '';
+            btn.classList.remove('loading');
+            btn.classList.add('sent');
+            btn.disabled = true;
+            btn.textContent = '✓ Demande envoyée';
+            btn.dataset.txt = btn.textContent;
+            setStep(3);
         }
 
         function secouer(input) { input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake'); }
@@ -325,7 +345,7 @@
                 result.classList.remove('hidden');
                 result.innerHTML = `<div class="panel ${response.ok ? 'ok' : 'err'}">${esc(data.message || 'Réponse du serveur invalide.')}</div>`;
                 if (response.ok) {
-                    btn.disabled = true;
+                    envoiTermine(btn);
                     say(data.notifie_par_email
                         ? `Votre demande est envoyée. Vous serez informé(e) par e-mail de la décision dans un délai de ${Number(data.delai_heures) || 12} heures.`
                         : (modeCreation

@@ -138,6 +138,8 @@ textarea{resize:vertical;min-height:84px;line-height:1.45}
 .btn::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);transform:skewX(-20deg);transition:left .7s}
 .btn:hover::after{left:130%}
 .btn[disabled]{opacity:.75;cursor:progress}
+.btn.sent,.btn.sent[disabled]{background:linear-gradient(135deg,#2fbf8a,var(--ok));color:#fff;opacity:1;cursor:default;box-shadow:0 12px 26px -12px rgba(18,163,107,.8)}
+.btn.sent:hover{transform:none}.btn.sent::after{display:none}
 .btn.loading::before{content:"";display:inline-block;width:14px;height:14px;margin-right:10px;vertical-align:-2px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .hidden{display:none!important}

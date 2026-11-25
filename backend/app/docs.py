@@ -77,7 +77,7 @@ class ModificationBody(BaseModel):
         examples=["1998-03-17"],
     )
     filiere: str | None = Field(default=None, max_length=150, description="ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; vide = effacer.")
-    niveau: str | None = Field(default=None, max_length=150, description="Licence 1, Licence 2 ou Licence 3 ; vide = effacer.")
+    niveau: str | None = Field(default=None, max_length=150, description="LICENCE 1, LICENCE 2 ou LICENCE 3 ; vide = effacer.")
     telephone: str | None = Field(default=None, max_length=40, description="Vide = effacer.")
     email: str | None = Field(default=None, examples=["nom@exemple.ci"], description="Vide = effacer.")
     sexe: str | None = Field(default=None, description="`M` ou `F` ; vide = effacer.")
@@ -96,7 +96,7 @@ class UpdateStudentBody(BaseModel):
     )
     date_naissance: str | None = Field(default=None, description="`AAAA-MM-JJ` ou `JJ/MM/AAAA` ; vide : efface.")
     filiere: str | None = Field(default=None, description="ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; vide : efface.")
-    niveau: str | None = Field(default=None, description="Licence 1, Licence 2 ou Licence 3 ; vide : efface.")
+    niveau: str | None = Field(default=None, description="LICENCE 1, LICENCE 2 ou LICENCE 3 ; vide : efface.")
     telephone: str | None = None
     email: str | None = None
     sexe: str | None = Field(default=None, description="`M` ou `F`.")
@@ -573,4 +573,4 @@ class RequestReceivedResponse(SuccessResponse):
 class ReferentielsResponse(BaseModel):
     status: Literal["success"] = "success"
     filieres: list[str] = Field(examples=[["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"]])
-    niveaux: list[str] = Field(examples=[["Licence 1", "Licence 2", "Licence 3"]])
+    niveaux: list[str] = Field(examples=[["LICENCE 1", "LICENCE 2", "LICENCE 3"]])

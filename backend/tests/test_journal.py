@@ -14,6 +14,7 @@ from test_db_flow import (  # noqa: F401  (client = fixture admin + nettoyage de
     import_csv,
     make_admin,
     make_partner,
+    skip_if_real_requests_pending,
 )
 
 from app import audit, config, security
@@ -65,7 +66,7 @@ def test_every_kind_of_action_is_traced(audited):
     assert e["details"]["importes"] == 2 and e["cible"] == "etudiants.csv" and e["code_http"] == 201
     assert e["ip"] == "testclient" and e["chemin"] == "/api/import_etudiants" and e["methode"] == "POST"
     # import en échec : tracé avec le motif
-    assert import_csv(client).status_code == 422
+    assert import_csv(client, "nom;prenoms;filiere\nZztfail;Essai;Génie Civil\n").status_code == 422
     failed = [x for x in events(action="IMPORT_ETUDIANTS_CSV") if x["statut"] == "ECHEC"]
     assert len(failed) == 1 and failed[0]["code_http"] == 422 and failed[0]["message"]
     assert failed[0]["details"]["erreurs"]
@@ -178,6 +179,7 @@ def test_bulk_approval_traces_each_request(audited):
     assert import_csv(client).status_code == 201
     for matricule in (MATRICULE_ALICE, MATRICULE_BOB):
         assert client.post("/api/demander_modification", json={"matricule": matricule, "telephone": "0100000000"}).status_code == 201
+    skip_if_real_requests_pending()
     assert client.post("/api/admin_approve_all").status_code == 200
     each = events(action="DEMANDE_CORRECTION_APPROUVEE")
     assert len(each) == 2 and all(x["details"]["mode"] == "masse" and x["statut"] == "SUCCES" for x in each)

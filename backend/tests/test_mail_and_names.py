@@ -4,7 +4,7 @@ Données de test : noms « Zzt… », matricules « ZZT… » (nettoyés par la 
 """
 import httpx
 import pytest
-from test_db_flow import client, import_csv, student  # noqa: F401
+from test_db_flow import client, import_csv, skip_if_real_requests_pending, student  # noqa: F401
 
 from app import mailer
 from app.student_rules import best_name_match, name_level, name_similarity
@@ -109,14 +109,14 @@ def test_creation_completes_the_existing_name_only_record_and_emails_the_student
     pending = submit_creation(client, nom="Zztkonane", prenoms="Alyne Marie", email="aline@exemple.ci", telephone="0102030405")
     match = pending["correspondance"]
     assert match["niveau"] == "proche" and match["a_completer"] is True and match["matricule"] is None
-    assert (match["nom"], match["prenoms"]) == ("Zztkonan", "Aline Marie")
+    assert (match["nom"], match["prenoms"]) == ("ZZTKONAN", "ALINE MARIE")
 
     response = client.post("/api/admin_creations", json={"id": pending["id"], "action": "approve"})
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["fusion"] is True and data["mail"] == "envoye" and "complété" in data["message"]
     merged = student(client, "ZZTM0506000005")
-    assert (merged["nom"], merged["prenoms"]) == ("Zztkonane", "Alyne Marie")  # version saisie fusionnée
+    assert (merged["nom"], merged["prenoms"]) == ("ZZTKONANE", "ALYNE MARIE")  # version saisie fusionnée
     assert merged["telephone"] == "0102030405" and merged["email"] == "aline@exemple.ci"
     assert client.get("/api/get_etudiants", params={"q": "Zztkon"}).json()["total"] == 1  # aucun doublon
     assert client.get("/api/get_etudiants", params={"q": "Zztautre"}).json()["total"] == 1  # l'autre est intact
@@ -130,7 +130,7 @@ def test_creation_without_name_in_database_creates_a_new_record(client, resend):
     assert pending["correspondance"] is None
     data = client.post("/api/admin_creations", json={"id": pending["id"], "action": "approve"}).json()
     assert data["fusion"] is False and data["mail"] == "sans_email" and resend == []  # pas d'adresse : pas d'envoi
-    assert student(client, "ZZTM0506000005")["nom"] == "Zztinconnu"
+    assert student(client, "ZZTM0506000005")["nom"] == "ZZTINCONNU"
 
 
 def test_same_name_with_other_matricule_is_flagged_but_not_merged(client, resend):
@@ -164,7 +164,7 @@ def test_correction_shows_name_check_and_emails_on_both_decisions(client, resend
     data = client.post("/api/admin_modifications", json={"id": request["id"], "action": "approve"}).json()
     assert data["mail"] == "envoye"
     assert resend[-1]["json"]["to"] == ["nouveau@exemple.ci"] and "approuvées" in resend[-1]["json"]["subject"]
-    assert student(client, "ZZTA1703980001")["nom"] == "Zztesst"
+    assert student(client, "ZZTA1703980001")["nom"] == "ZZTESST"
     # Nom sans rapport : signalé « different » ; refus -> mail à l'adresse connue du dossier
     assert client.post(url, json={"matricule": "ZZTA1703980001", "nom": "Zzxwvuts"}).status_code == 201
     request = [r for r in client.get("/api/admin_modifications").json()["data"] if r["matricule"] == "ZZTA1703980001"][0]
@@ -179,6 +179,7 @@ def test_correction_shows_name_check_and_emails_on_both_decisions(client, resend
 
 
 def test_approve_all_sends_one_mail_per_request(client, resend):
+    skip_if_real_requests_pending()
     assert import_csv(client).status_code == 201
     assert client.post("/api/demander_modification", json={"matricule": "ZZTA1703980001", "email": "a@exemple.ci"}).status_code == 201
     submit_creation(client, nom="Zztnouveau", prenoms="Eve", email="eve@exemple.ci")
@@ -193,7 +194,7 @@ def test_decision_succeeds_even_if_mail_fails(client, monkeypatch):
     monkeypatch.setattr(mailer.httpx, "post", lambda *a, **k: httpx.Response(500))
     pending = submit_creation(client, nom="Zztpanne", prenoms="Max", email="max@exemple.ci")
     response = client.post("/api/admin_creations", json={"id": pending["id"], "action": "approve"})
-    assert response.status_code == 200 and student(client, "ZZTM0506000005")["nom"] == "Zztpanne"
+    assert response.status_code == 200 and student(client, "ZZTM0506000005")["nom"] == "ZZTPANNE"
     assert response.json()["mail"] == "echec" and response.json()["mail_erreur"] == "HTTP 500"  # signalé à l'admin
 
 

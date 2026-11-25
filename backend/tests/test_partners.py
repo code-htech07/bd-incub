@@ -129,7 +129,7 @@ def test_verification_permission_is_read_only_and_filters_fields(admin):
     body = response.json()
     assert body["message"] == "Étudiant vérifié." and body["inscription"] is None
     assert set(body["data"]) == {"matricule", "nom", "prenoms", "date_naissance", "filiere", "niveau"}
-    assert body["data"]["nom"] == "Zztest" and body["data"]["date_naissance"] == "1998-03-17"
+    assert body["data"]["nom"] == "ZZTEST" and body["data"]["date_naissance"] == "1998-03-17"
     assert admin.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]["numero_candidat"] is None
     # numero_candidat n'a pas sa place dans une vérification ; sans permission, l'inscription est refusée
     assert call(key, numero_candidat="X-1").status_code == 400

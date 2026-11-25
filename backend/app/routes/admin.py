@@ -28,6 +28,7 @@ from ..student_rules import (
     best_name_match,
     load_students_for_matching,
     name_key,
+    upper_text,
     name_level,
     name_similarity,
     REFERENCE_VALIDATORS,
@@ -387,6 +388,8 @@ def _decide_modification(db: Database, request_id: int, action: str, comment: st
                             raise ApiError(422, "Date de naissance invalide.")
                     if field in ("telephone", "email", "sexe", "allergies_affection") and value == "":
                         value = None
+                    if field == "allergies_affection":
+                        value = upper_text(value)
                     assignments.append(f"{field} = %s")
                     values.append(value)
                 cursor.execute(
@@ -521,7 +524,7 @@ def _register_student(by_matricule: dict, by_name: dict, row: dict) -> None:
     "nom qui n'a pas encore de matricule. **Une cellule vide conserve la valeur déjà en base.** "
     "Les noms et prénoms n'acceptent que les lettres de l'alphabet français, "
     "espaces, tirets et apostrophes (aucune écriture non latine, aucun chiffre ni symbole). "
-    "`filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : Licence 1, Licence 2 ou Licence 3 "
+    "`filiere` : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA ; `niveau` : LICENCE 1, LICENCE 2 ou LICENCE 3 "
     "(casse et espaces ignorés) ; toute autre valeur est une erreur de ligne. "
     "Les lignes dont la première cellule commence par `#` sont ignorées (lignes d'aide du modèle). "
     "Tout ou rien : une erreur annule l'import.",
@@ -601,7 +604,7 @@ def import_students(
                     email = row.get("email", "")
                     sexe = row.get("sexe", "").upper()
                     telephone = row.get("telephone", "")
-                    allergies = row.get("allergies_affection", "")
+                    allergies = row.get("allergies_affection", "").upper()
 
                     if not nom or not prenoms:
                         errors.append(f"Ligne {row_number} : le nom et les prénoms sont obligatoires.")
@@ -896,7 +899,7 @@ def _decide_creation(db: Database, request_id: int, action: str, comment: str | 
                     fields.get("telephone") or None,
                     fields.get("email") or None,
                     fields.get("sexe") or None,
-                    fields.get("allergies_affection") or None,
+                    upper_text(fields.get("allergies_affection")) or None,
                     lookup_reference_id(cursor, "filiere", fields.get("filiere")),
                     lookup_reference_id(cursor, "niveau", fields.get("niveau")),
                 )
@@ -1098,7 +1101,7 @@ def create_student(body: Any = Depends(json_body), db: Database = Depends(get_db
     if sexe and sexe not in ("M", "F"):
         raise ApiError(422, "Le sexe doit être M ou F.")
     telephone = text("telephone", 40, "Téléphone")
-    allergies = text("allergies_affection", 2000, "Allergies / affection")
+    allergies = upper_text(text("allergies_affection", 2000, "Allergies / affection"))
     try:
         filiere = validate_filiere(text("filiere", 150, "Filière"))
         niveau = validate_niveau(text("niveau", 150, "Niveau"))

@@ -110,7 +110,7 @@
     <script>
         const API = (window.UPB_API_URL || '').replace(/\/+$/, '');
         // Listes fermées (source : GET /api/referentiels ; valeurs de repli identiques)
-        const REFERENTIELS = { filieres: ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"], niveaux: ["Licence 1", "Licence 2", "Licence 3"] };
+        const REFERENTIELS = { filieres: ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"], niveaux: ["LICENCE 1", "LICENCE 2", "LICENCE 3"] };
         function appliquerReferentiels() {
             UPBSelect.setOptions(document.getElementById('filiere'), REFERENTIELS.filieres);
             UPBSelect.setOptions(document.getElementById('niveau'), REFERENTIELS.niveaux);

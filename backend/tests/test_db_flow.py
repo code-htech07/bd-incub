@@ -17,8 +17,8 @@ ADMIN_ID = "ZZTadmin"
 ADMIN_PASSWORD = "Mot-de-passe-test-1"
 CSV = (
     "Matricule;Nom;Prénom;Date de naissance;Filière;Niveau;Téléphone;Email;Sexe\n"
-    "ZZTA1703980001;Zztest;Alice;17/03/1998;ASSRI;Licence 3;0102030405;alice@exemple.ci;f\n"
-    "zztb0205990001;Zztest;Bob;1999-05-02;ASSRI;Licence 2;;;M\n"
+    "ZZTA1703980001;Zztest;Alice;17/03/1998;ASSRI;LICENCE 3;0102030405;alice@exemple.ci;f\n"
+    "zztb0205990001;Zztest;Bob;1999-05-02;ASSRI;LICENCE 2;;;M\n"
 )
 MATRICULE_ALICE = "ZZTA1703980001"
 MATRICULE_BOB = "ZZTB0205990001"
@@ -29,7 +29,7 @@ def cleanup():
         conn.execute("DELETE FROM etudiant_creation_demande WHERE matricule_saisi LIKE 'ZZT%'")
         conn.execute("DELETE FROM administrateur WHERE identifiant LIKE 'ZZT%'")
         conn.execute("DELETE FROM partenaire WHERE nom LIKE 'ZZT%'")
-        conn.execute("DELETE FROM etudiant WHERE matricule LIKE 'ZZT%' OR nom LIKE 'Zzt%'")
+        conn.execute("DELETE FROM etudiant WHERE matricule LIKE 'ZZT%' OR nom ILIKE 'Zzt%'")
         conn.execute("DELETE FROM filiere WHERE libelle LIKE 'ZZTEST%'")
         conn.execute("DELETE FROM niveau WHERE libelle LIKE 'ZZTEST%'")
         conn.commit()
@@ -74,7 +74,7 @@ def test_full_flow(client):
     response = client.post("/api/verifier", json={"matricule": MATRICULE_ALICE.lower()})
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["nom"] == "Zztest" and data["date_naissance"] == "1998-03-17"
+    assert data["nom"] == "ZZTEST" and data["date_naissance"] == "1998-03-17"
     assert data["filiere"] == "ASSRI" and data["sexe"] == "F"
     unknown = client.post("/api/verifier", json={"matricule": "INCONNU"})
     assert unknown.status_code == 404
@@ -100,7 +100,7 @@ def test_full_flow(client):
             )
             assert response.status_code == 200, response.text
             body = response.json()
-            assert body["data"]["nom"] == "Zztest" and body["data"]["date_naissance"] == "1998-03-17"
+            assert body["data"]["nom"] == "ZZTEST" and body["data"]["date_naissance"] == "1998-03-17"
             assert "id" not in body["data"] and body["inscription"] is None
         still = client.get("/api/get_etudiants", params={"q": MATRICULE_ALICE}).json()["data"][0]
         assert still["numero_candidat"] is None
@@ -197,7 +197,7 @@ def test_full_flow(client):
     response = client.post("/api/admin_modifications", json={"id": request_id, "action": "approve"})
     assert response.status_code == 200, response.text
     assert response.json()["matricule"] == MATRICULE_ALICE
-    assert student(client, MATRICULE_ALICE)["prenoms"] == "Béatrice"
+    assert student(client, MATRICULE_ALICE)["prenoms"] == "BÉATRICE"
 
     # --- Mise à jour admin ---
     beatrice = student_id(client, MATRICULE_ALICE)
@@ -236,7 +236,7 @@ def test_full_flow(client):
 
 
 def test_failed_import_rolls_back_valid_rows(client):
-    content = CSV + "Zztest;Chloé;31/02/1998;ASSRI;Licence 1;;;\n"
+    content = CSV + "Zztest;Chloé;31/02/1998;ASSRI;LICENCE 1;;;\n"
     response = import_csv(client, content)
     assert response.status_code == 422
     assert response.json()["message"].startswith("Aucune ligne importée")
@@ -250,7 +250,7 @@ def test_unknown_matricule_creation_flow(client):
     # Le candidat renseigne ses informations -> demande en attente
     body = {
         "matricule": saisi, "nom": "Zztest", "prenoms": "Carole", "date_naissance": "05/06/2000",
-        "filiere": "ASSRI", "niveau": "Licence 1", "email": "carole@exemple.ci",
+        "filiere": "ASSRI", "niveau": "LICENCE 1", "email": "carole@exemple.ci",
         "telephone": "0101010101", "sexe": "f", "allergies_affection": "Arachides",
     }
     response = client.post("/api/demander_creation", json=body)
@@ -263,7 +263,7 @@ def test_unknown_matricule_creation_flow(client):
     pending = [r for r in client.get("/api/admin_creations").json()["data"]
                if r["matricule_saisi"] == saisi]
     assert len(pending) == 1
-    assert pending[0]["donnees"]["prenoms"] == "Carole"
+    assert pending[0]["donnees"]["prenoms"] == "CAROLE"
     assert pending[0]["donnees"]["date_naissance"] == "2000-06-05"
     # Sans jeton : refusé
     assert client.get("/api/admin_creations", headers={"Authorization": "Bearer x"}).status_code == 401
@@ -275,8 +275,8 @@ def test_unknown_matricule_creation_flow(client):
         "/api/admin_creations", json={"id": pending[0]["id"], "action": "approve"}
     ).status_code == 404
     data = client.post("/api/verifier", json={"matricule": saisi}).json()["data"]
-    assert data["nom"] == "Zztest" and data["sexe"] == "F" and data["filiere"] == "ASSRI"
-    assert data["allergies_affection"] == "Arachides" and data["date_naissance"] == "2000-06-05"
+    assert data["nom"] == "ZZTEST" and data["sexe"] == "F" and data["filiere"] == "ASSRI"
+    assert data["allergies_affection"] == "ARACHIDES" and data["date_naissance"] == "2000-06-05"
     # Le dossier existe maintenant : nouvelle demande refusée
     assert client.post("/api/demander_creation", json=body).status_code == 409
 
@@ -386,18 +386,22 @@ def test_disabled_admin_cannot_login(client):
     security.login_throttle.reset("ip:testclient", f"id:{ADMIN_ID.lower()}")
 
 
-def test_approve_all_pending_requests(client):
-    # /api/admin_approve_all agit sur TOUTES les demandes en attente de la base : on ne
-    # lance ce test que s'il n'y a aucune demande réelle (hors données de test ZZT).
+def skip_if_real_requests_pending():
+    """/api/admin_approve_all agit sur TOUTES les demandes en attente de la base : un test qui l'appelle ne doit
+    s'exécuter que s'il n'y a aucune demande réelle (hors données de test ZZT), sinon il les approuverait."""
     with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
         real = conn.execute(
             "SELECT (SELECT COUNT(*) FROM etudiant_modification m JOIN etudiant e ON e.id = m.etudiant_id "
-            "WHERE m.statut = 'EN_ATTENTE' AND e.matricule NOT LIKE 'ZZT%') + "
+            "WHERE m.statut = 'EN_ATTENTE' AND COALESCE(e.matricule, '') NOT LIKE 'ZZT%') + "
             "(SELECT COUNT(*) FROM etudiant_creation_demande WHERE statut = 'EN_ATTENTE' "
             "AND matricule_saisi NOT LIKE 'ZZT%')"
         ).fetchone()[0]
     if real:
         pytest.skip("Des demandes réelles sont en attente : test non exécuté pour ne pas les approuver.")
+
+
+def test_approve_all_pending_requests(client):
+    skip_if_real_requests_pending()
 
     assert import_csv(client).status_code == 201
     for matricule, phone in ((MATRICULE_ALICE, "0111111111"), (MATRICULE_BOB, "0222222222")):

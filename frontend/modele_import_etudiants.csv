@@ -3,9 +3,10 @@
 # Seuls nom et prenoms sont obligatoires : toutes les autres colonnes, matricule compris, peuvent rester vides.
 # matricule : jamais généré par le système. S'il est fourni il est importé tel quel : 3 ou 4 lettres majuscules + 6 chiffres jjmmaa + 4 chiffres (ex. KOUA1703980001), unique. Sans matricule, l'étudiant est créé et son matricule sera renseigné ensuite.
 # Réimport : un fichier déjà importé peut être réimporté pour mettre à jour les étudiants. Une cellule vide conserve la valeur déjà en base. Une ligne avec matricule est rapprochée par son matricule, une ligne sans matricule par son nom et ses prénoms.
+# Casse : vous pouvez écrire en minuscules ou en majuscules. Tout est enregistré en MAJUSCULES (noms, prénoms, allergies, filière, niveau) et la casse n'a aucune importance.
 # nom et prenoms : alphabet français uniquement (lettres accentuées, espaces, tirets, apostrophes) ; ni chiffres ni symboles.
-# date_naissance : AAAA-MM-JJ ou JJ/MM/AAAA. sexe : M ou F. filiere : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA. niveau : Licence 1, Licence 2 ou Licence 3.
+# date_naissance : AAAA-MM-JJ ou JJ/MM/AAAA. sexe : M ou F. filiere : ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA. niveau : LICENCE 1, LICENCE 2 ou LICENCE 3.
 # Exemples (retirez le # pour les importer) :
-# KOUADIO;Alain;KOUA1703980001;17/03/1998;ASSRI;Licence 3;0701020304;alain@exemple.ci;M;
-# TRAORE;Aminata;TRAA2005000001;;MIAGE;Licence 2;;;F;Allergie à la pénicilline
+# KOUADIO;Alain;KOUA1703980001;17/03/1998;ASSRI;LICENCE 3;0701020304;alain@exemple.ci;M;
+# TRAORE;Aminata;TRAA2005000001;;MIAGE;LICENCE 2;;;F;Allergie à la pénicilline
 # YAO;Marie-Claire;;;;;;;;

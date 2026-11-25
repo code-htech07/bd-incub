@@ -563,6 +563,7 @@
         .row-btn.danger:hover{background:#8c2630;border-color:#8c2630;color:#fff}
         .req-star{color:#c0392b}
         .opt{font-weight:500;color:var(--mut);font-size:.85em}
+        #s-nom,#s-prenoms,#s-allergies{text-transform:uppercase}
 
         /* La colonne d'actions reste visible quand le tableau défile horizontalement */
         #etudiants table thead th:last-child,#etudiants table tbody td:last-child{position:sticky;right:0;z-index:2;background:#f7faff;
@@ -696,7 +697,7 @@
                 </div>
                 <button class="admin-action" type="button" id="btn-import">Importer les étudiants</button>
                 <button class="admin-action" type="button" id="btn-template">Télécharger le modèle CSV</button>
-                <p class="hint"><b>Seules les colonnes nom et prenoms sont obligatoires.</b> Colonnes facultatives : matricule, date_naissance (AAAA-MM-JJ ou JJ/MM/AAAA), filiere (ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA), niveau (Licence 1, Licence 2 ou Licence 3), telephone, email, sexe (M/F), allergies_affection. Le matricule n’est jamais généré : s’il est fourni, il est importé tel quel et doit respecter le format (3 ou 4 lettres majuscules, 6 chiffres jjmmaa, 4 chiffres, ex. KOUA1703980001) et être unique ; sinon l’étudiant est créé sans matricule, à renseigner ensuite dans la liste. Les noms et prénoms n’acceptent que l’alphabet français (lettres accentuées, espaces, tirets, apostrophes) : ni chiffres, ni symboles, ni écritures non latines. <b>Réimport possible</b> : un étudiant déjà en base est mis à jour (rapproché par son matricule, ou par ses nom et prénoms si la ligne n’a pas de matricule ; plusieurs homonymes : précisez le matricule). Une cellule vide : la valeur déjà en base est conservée. Les lignes commençant par # sont ignorées.</p>
+                <p class="hint"><b>Seules les colonnes nom et prenoms sont obligatoires.</b> Colonnes facultatives : matricule, date_naissance (AAAA-MM-JJ ou JJ/MM/AAAA), filiere (ASSRI, RIT, MIAGE, SEG, SEA, SJAP ou 3EA), niveau (LICENCE 1, LICENCE 2 ou LICENCE 3), telephone, email, sexe (M/F), allergies_affection. Le matricule n’est jamais généré : s’il est fourni, il est importé tel quel et doit respecter le format (3 ou 4 lettres majuscules, 6 chiffres jjmmaa, 4 chiffres, ex. KOUA1703980001) et être unique ; sinon l’étudiant est créé sans matricule, à renseigner ensuite dans la liste. Les noms et prénoms n’acceptent que l’alphabet français (lettres accentuées, espaces, tirets, apostrophes) : ni chiffres, ni symboles, ni écritures non latines. <b>Réimport possible</b> : un étudiant déjà en base est mis à jour (rapproché par son matricule, ou par ses nom et prénoms si la ligne n’a pas de matricule ; plusieurs homonymes : précisez le matricule). Une cellule vide : la valeur déjà en base est conservée. Les lignes commençant par # sont ignorées.</p>
             </div>
             <div class="import-result" id="import-result" aria-live="polite"></div>
         </section>
@@ -3354,7 +3355,7 @@
         const etudiantForm = { courant: null };
 
         // Listes fermées (source : GET /api/referentiels ; valeurs de repli identiques si l'API tarde)
-        const REFERENTIELS = { filieres: ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"], niveaux: ["Licence 1", "Licence 2", "Licence 3"] };
+        const REFERENTIELS = { filieres: ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"], niveaux: ["LICENCE 1", "LICENCE 2", "LICENCE 3"] };
 
         function remplirListesFiliereNiveau() {
             UPBSelect.setOptions($('s-filiere'), REFERENTIELS.filieres);

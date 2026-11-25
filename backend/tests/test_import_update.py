@@ -6,8 +6,8 @@ import pytest
 from test_db_flow import client, import_csv, student  # noqa: F401
 
 HEADER = "nom;prenoms;matricule;date_naissance;filiere;niveau;telephone;email;sexe;allergies_affection\n"
-ALICE = "Zztest;Alice;ZZTA1703980001;17/03/1998;ASSRI;Licence 3;0102030405;alice@exemple.ci;F;Arachides\n"
-BOB = "Zztest;Bob;ZZTB0205990001;02/05/1999;RIT;Licence 1;0707070707;bob@exemple.ci;M;\n"
+ALICE = "Zztest;Alice;ZZTA1703980001;17/03/1998;ASSRI;LICENCE 3;0102030405;alice@exemple.ci;F;Arachides\n"
+BOB = "Zztest;Bob;ZZTB0205990001;02/05/1999;RIT;LICENCE 1;0707070707;bob@exemple.ci;M;\n"
 
 
 def listing(client, q="Zzt"):
@@ -16,15 +16,15 @@ def listing(client, q="Zzt"):
 
 def test_reimport_updates_changed_rows_and_keeps_the_rest(client):
     assert import_csv(client, HEADER + ALICE + BOB).status_code == 201
-    changed = ALICE.replace("0102030405", "0909090909").replace("Licence 3", "Licence 2")
+    changed = ALICE.replace("0102030405", "0909090909").replace("LICENCE 3", "LICENCE 2")
     response = import_csv(client, HEADER + changed + BOB)
     assert response.status_code == 201, response.text
     body = response.json()
     assert (body["imported"], body["updated"], body["unchanged"]) == (0, 1, 1)
     assert body["message"].startswith("Import terminé : 1 mis à jour, 1 inchangé(s).") and body["matricules"] == ["ZZTA1703980001"]
     alice = student(client, "ZZTA1703980001")
-    assert alice["telephone"] == "0909090909" and alice["niveau"] == "Licence 2"
-    assert alice["email"] == "alice@exemple.ci" and alice["allergies_affection"] == "Arachides"  # inchangés
+    assert alice["telephone"] == "0909090909" and alice["niveau"] == "LICENCE 2"
+    assert alice["email"] == "alice@exemple.ci" and alice["allergies_affection"] == "ARACHIDES"  # inchangés
     assert listing(client)["total"] == 2
 
 
@@ -35,7 +35,7 @@ def test_empty_cells_keep_the_value_in_database(client):
     assert response.status_code == 201 and response.json()["unchanged"] == 1 and response.json()["updated"] == 0
     alice = student(client, "ZZTA1703980001")
     assert (alice["date_naissance"], alice["filiere"], alice["niveau"], alice["telephone"], alice["email"], alice["sexe"], alice["allergies_affection"]) == (
-        "1998-03-17", "ASSRI", "Licence 3", "0102030405", "alice@exemple.ci", "F", "Arachides")
+        "1998-03-17", "ASSRI", "LICENCE 3", "0102030405", "alice@exemple.ci", "F", "ARACHIDES")
     # Un fichier qui ne renseigne qu'une colonne ne touche que celle-là
     response = import_csv(client, "nom;prenoms;matricule;email\nZztest;Alice;ZZTA1703980001;nouvelle@exemple.ci\n")
     assert response.json()["updated"] == 1
@@ -48,7 +48,7 @@ def test_matricule_row_can_correct_the_spelling_but_not_hijack_another_student(c
     # Orthographe corrigée (nom proche) : mise à jour du nom
     response = import_csv(client, "nom;prenoms;matricule\nZztestt;Alice;ZZTA1703980001\n")
     assert response.status_code == 201 and response.json()["updated"] == 1
-    assert student(client, "ZZTA1703980001")["nom"] == "Zztestt"
+    assert student(client, "ZZTA1703980001")["nom"] == "ZZTESTT"
     # Nom sans rapport : le matricule appartient à quelqu'un d'autre -> erreur, rien n'est modifié
     response = import_csv(client, "nom;prenoms;matricule;telephone\nZzxwvuts;Marc;ZZTA1703980001;0000000000\n")
     assert response.status_code == 422 and "appartient à un autre étudiant" in response.json()["errors"][0]
@@ -61,7 +61,7 @@ def test_rows_without_matricule_are_matched_by_name_and_birth_date(client):
     response = import_csv(client, "nom;prenoms;telephone\nZZTEST;alice;0808080808\n")
     assert response.status_code == 201 and (response.json()["updated"], response.json()["imported"]) == (1, 0)
     alice = student(client, "ZZTA1703980001")
-    assert alice["telephone"] == "0808080808" and alice["nom"] == "Zztest" and alice["prenoms"] == "Alice"
+    assert alice["telephone"] == "0808080808" and alice["nom"] == "ZZTEST" and alice["prenoms"] == "ALICE"
     # Deux homonymes en base : la ligne sans matricule est ambiguë, sauf si la date de naissance tranche
     assert import_csv(client, HEADER + "Zztest;Alice;ZZTA0205990009;05/05/1990;;;;;;\n").status_code == 201
     response = import_csv(client, "nom;prenoms;telephone\nZztest;Alice;0111111111\n")

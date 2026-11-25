@@ -169,3 +169,5 @@ textarea{resize:vertical;min-height:84px;line-height:1.45}
 @keyframes fxRipple{to{transform:scale(2.4);opacity:0}}
 @media(max-width:480px){.card{padding:34px 20px 24px}.step span.t{display:none}}
 @media(prefers-reduced-motion:reduce){*,.brand-mark::before,.brand-mark::after,.brand-mark__image{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}.fx-ripple{display:none}}
+
+#nom,#prenoms,#allergies-affection{text-transform:uppercase}

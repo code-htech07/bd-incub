@@ -599,3 +599,27 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   et les informations saisies sont conservées pour permettre de corriger.
 - Vérifié dans Edge (serveur simulé) : pendant l'envoi `loading` ; après, `sent`, champs vides, formulaire masqué ; nouvelle
   vérification : formulaire et bouton restaurés. Test : `tests/test_mail_and_names.py`.
+
+## Étape 25 — Tout en majuscules, sans sensibilité à la casse
+
+- **Règle** : noms, prénoms, allergies/affections, matricules, filières et niveaux sont enregistrés **en MAJUSCULES**, quelle
+  que soit la saisie (portail, administration, import CSV, API, console SQL). Les accents français sont conservés
+  (« Kouamé » -> « KOUAMÉ »). L'adresse e-mail n'est **pas** modifiée (elle ne se met pas en majuscules sans risque).
+- **Niveaux** : la liste devient `LICENCE 1`, `LICENCE 2`, `LICENCE 3` (les filières l'étaient déjà). La saisie reste libre
+  (`licence 2` est reconnu) ; le portail et l'administration affichent les valeurs en majuscules, et les champs de saisie des
+  noms et allergies s'affichent en majuscules pendant la frappe.
+- **Où** : `validate_name` (import, portail, administration, approbations) et `upper_text` (allergies) pour que les réponses de
+  l'API soient déjà en majuscules ; les demandes anciennes en casse mixte sont aussi converties à l'approbation.
+- **Garantie en base** (migration `11_majuscules.sql`) : des déclencheurs (`etudiant`, `filiere`, `niveau`) convertissent à
+  chaque écriture, même hors de l'API ; la conversion des accents est explicite (indépendante de la locale de la base). La
+  migration convertit aussi les données existantes (libellés ne différant que par la casse fusionnés) et peut être rejouée.
+- **Insensible à la casse** : matricule (déjà en majuscules à la saisie), recherche (ILIKE), rapprochement par nom à
+  l'import et pour les demandes (déjà sans casse ni accents), listes de filières/niveaux.
+- **À appliquer en production** : `python -m scripts.migrate` sur la base de production **avant** de déployer le code (pas de
+  colonne ajoutée : les anciennes versions continuent de fonctionner), puis redéployer le backend et le frontend.
+- Tests : `tests/test_majuscules.py` ; valeurs attendues des autres tests passées en majuscules.
+- Valeur historique hors liste (filière/niveau) renvoyée inchangée par un formulaire : la comparaison avec la base ignore
+  désormais la casse (les libellés sont en majuscules en base).
+- Tests : tout test qui appelle `/api/admin_approve_all` (qui approuve **toutes** les demandes en attente de la base) commence par
+  `skip_if_real_requests_pending()` et ne s'exécute pas s'il existe une demande réelle, pour ne jamais approuver les demandes
+  d'essai faites à la main sur la base de développement.

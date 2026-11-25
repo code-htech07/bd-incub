@@ -1,4 +1,4 @@
-"""Listes fermées : filières (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveaux (Licence 1, 2, 3).
+"""Listes fermées : filières (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveaux (LICENCE 1, 2, 3).
 
 Données de test : noms « Zzt… », matricules « ZZT… », filière historique « ZZTEST Ancienne » (nettoyés).
 """
@@ -16,7 +16,7 @@ from app.student_rules import FILIERES, NIVEAUX, validate_filiere, validate_nive
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 FILIERE_LIST = ["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"]
-NIVEAU_LIST = ["Licence 1", "Licence 2", "Licence 3"]
+NIVEAU_LIST = ["LICENCE 1", "LICENCE 2", "LICENCE 3"]
 
 
 # ------------------------------------------------------------------ règles (sans base)
@@ -40,17 +40,17 @@ def test_filiere_refuses_other_values(value):
 
 
 @pytest.mark.parametrize("value,expected", [
-    ("Licence 1", "Licence 1"), ("licence 2", "Licence 2"), ("LICENCE3", "Licence 3"), (" licence  3 ", "Licence 3"), ("", None), (None, None),
+    ("LICENCE 1", "LICENCE 1"), ("licence 2", "LICENCE 2"), ("LICENCE3", "LICENCE 3"), (" licence  3 ", "LICENCE 3"), ("", None), (None, None),
 ])
 def test_niveau_accepts_list_values(value, expected):
     assert validate_niveau(value) == expected
 
 
-@pytest.mark.parametrize("value", ["Master 1", "L1", "Licence 4", "Licence", "Doctorat"])
+@pytest.mark.parametrize("value", ["Master 1", "L1", "LICENCE 4", "LICENCE", "Doctorat"])
 def test_niveau_refuses_other_values(value):
     with pytest.raises(ValueError) as error:
         validate_niveau(value)
-    assert "Licence 1, Licence 2, Licence 3" in str(error.value)
+    assert "LICENCE 1, LICENCE 2, LICENCE 3" in str(error.value)
 
 
 # ------------------------------------------------------------------ pages, composant et modèle
@@ -107,21 +107,21 @@ def test_import_normalises_and_validates_filiere_and_niveau(client):
     csv = "nom;prenoms;filiere;niveau\nZztest;Alice;assri;licence 2\nZztest;Bob;;\nZztest;Carl;3EA;LICENCE3\n"
     response = import_csv(client, csv)
     assert response.status_code == 201, response.text
-    rows = {r["prenoms"]: r for r in client.get("/api/get_etudiants", params={"q": "Zztest", "per_page": 50}).json()["data"]}
-    assert (rows["Alice"]["filiere"], rows["Alice"]["niveau"]) == ("ASSRI", "Licence 2")
+    rows = {r["prenoms"].title(): r for r in client.get("/api/get_etudiants", params={"q": "Zztest", "per_page": 50}).json()["data"]}
+    assert (rows["Alice"]["filiere"], rows["Alice"]["niveau"]) == ("ASSRI", "LICENCE 2")
     assert (rows["Bob"]["filiere"], rows["Bob"]["niveau"]) == (None, None)
-    assert (rows["Carl"]["filiere"], rows["Carl"]["niveau"]) == ("3EA", "Licence 3")
+    assert (rows["Carl"]["filiere"], rows["Carl"]["niveau"]) == ("3EA", "LICENCE 3")
 
 
 def test_import_rejects_unknown_filiere_and_niveau_all_or_nothing(client):
-    csv = ("nom;prenoms;filiere;niveau\nZztest;Alice;RIT;Licence 1\nZztest;Bob;Génie Civil;Licence 1\n"
+    csv = ("nom;prenoms;filiere;niveau\nZztest;Alice;RIT;LICENCE 1\nZztest;Bob;Génie Civil;LICENCE 1\n"
            "Zztest;Carl;RIT;Master 1\nZztest;Dina;ASRI;L2\n")
     response = import_csv(client, csv)
     assert response.status_code == 422
     errors = response.json()["errors"]
     assert len(errors) == 3
     assert errors[0].startswith("Ligne 3") and "Filière non reconnue" in errors[0] and "ASSRI, RIT, MIAGE" in errors[0]
-    assert errors[1].startswith("Ligne 4") and "Niveau non reconnu" in errors[1] and "Licence 1, Licence 2, Licence 3" in errors[1]
+    assert errors[1].startswith("Ligne 4") and "Niveau non reconnu" in errors[1] and "LICENCE 1, LICENCE 2, LICENCE 3" in errors[1]
     assert errors[2].startswith("Ligne 5") and "Filière non reconnue" in errors[2]
     assert client.get("/api/get_etudiants", params={"q": "Zztest"}).json()["total"] == 0
 
@@ -147,10 +147,10 @@ def test_candidate_creation_request_uses_the_lists(client):
         assert "non reconnu" in response.json()["message"] and "Valeurs autorisées" in response.json()["message"]
     assert client.post("/api/demander_creation", json={**base, "filiere": "miage", "niveau": "licence 3"}).status_code == 201
     pending = [r for r in client.get("/api/admin_creations").json()["data"] if r["matricule_saisi"] == "ZZTC0506000001"][0]
-    assert pending["donnees"]["filiere"] == "MIAGE" and pending["donnees"]["niveau"] == "Licence 3"  # forme canonique
+    assert pending["donnees"]["filiere"] == "MIAGE" and pending["donnees"]["niveau"] == "LICENCE 3"  # forme canonique
     assert client.post("/api/admin_creations", json={"id": pending["id"], "action": "approve"}).status_code == 200
     created = student(client, "ZZTC0506000001")
-    assert (created["filiere"], created["niveau"]) == ("MIAGE", "Licence 3")
+    assert (created["filiere"], created["niveau"]) == ("MIAGE", "LICENCE 3")
 
 
 def test_candidate_correction_uses_the_lists_but_tolerates_an_unchanged_legacy_value(client):
@@ -168,10 +168,10 @@ def test_candidate_correction_uses_the_lists_but_tolerates_an_unchanged_legacy_v
     assert response.status_code == 422 and "Niveau non reconnu" in response.json()["message"]
     assert client.post(url, json={"matricule": matricule, "filiere": "rit", "niveau": "licence 1"}).status_code == 201
     request = [r for r in client.get("/api/admin_modifications").json()["data"] if r["matricule"] == matricule][0]
-    assert request["modifications"] == {"filiere": "RIT", "niveau": "Licence 1"}
+    assert request["modifications"] == {"filiere": "RIT", "niveau": "LICENCE 1"}
     assert client.post("/api/admin_modifications", json={"id": request["id"], "action": "approve"}).status_code == 200
     data = student(client, matricule)
-    assert (data["filiere"], data["niveau"]) == ("RIT", "Licence 1")
+    assert (data["filiere"], data["niveau"]) == ("RIT", "LICENCE 1")
 
 
 def test_admin_forms_use_the_lists_and_keep_legacy_values(client):
@@ -181,21 +181,21 @@ def test_admin_forms_use_the_lists_and_keep_legacy_values(client):
         assert response.status_code == 422 and "Valeurs autorisées" in response.json()["message"], field
     created = client.post("/api/admin_etudiants", json={"nom": "Zztest", "prenoms": "Alice", "matricule": "ZZTA1703980001", "filiere": "sea", "niveau": "licence 3"})
     assert created.status_code == 201, created.text
-    assert (created.json()["data"]["filiere"], created.json()["data"]["niveau"]) == ("SEA", "Licence 3")
+    assert (created.json()["data"]["filiere"], created.json()["data"]["niveau"]) == ("SEA", "LICENCE 3")
     # Modification
     row = created.json()["data"]
     update = lambda **fields: client.post("/api/update_etudiant", json={"id": row["id"], **fields})  # noqa: E731
     assert update(filiere="Génie Civil").status_code == 422 and update(niveau="Master 1").status_code == 422
-    assert update(filiere="sjap", niveau="Licence 1").status_code == 200
-    assert (student(client, "ZZTA1703980001")["filiere"], student(client, "ZZTA1703980001")["niveau"]) == ("SJAP", "Licence 1")
+    assert update(filiere="sjap", niveau="LICENCE 1").status_code == 200
+    assert (student(client, "ZZTA1703980001")["filiere"], student(client, "ZZTA1703980001")["niveau"]) == ("SJAP", "LICENCE 1")
     assert update(filiere="", niveau="").status_code == 200  # effacer reste possible
     assert student(client, "ZZTA1703980001")["filiere"] is None
     # Étudiant historique : sa valeur hors liste, renvoyée par le formulaire, n'est ni refusée ni effacée
     matricule = legacy_student()
     legacy = [r for r in client.get("/api/get_etudiants", params={"q": "Zztlegacy"}).json()["data"]][0]
-    assert legacy["filiere"] == "ZZTEST Ancienne"
+    assert legacy["filiere"] == "ZZTEST ANCIENNE"  # la base met les libellés en majuscules
     ok = client.post("/api/update_etudiant", json={"id": legacy["id"], "filiere": "ZZTEST Ancienne", "telephone": "0102030405"})
     assert ok.status_code == 200, ok.text
     data = student(client, matricule)
-    assert data["filiere"] == "ZZTEST Ancienne" and data["telephone"] == "0102030405"
+    assert data["filiere"] == "ZZTEST ANCIENNE" and data["telephone"] == "0102030405"
     assert client.post("/api/update_etudiant", json={"id": legacy["id"], "filiere": "Autre ancienne"}).status_code == 422

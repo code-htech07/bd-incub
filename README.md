@@ -99,7 +99,7 @@ invalide ou expiré ; `503` si `UPB_SECRET_KEY` n'est pas configurée.
 | Méthode et chemin | Auth | Fonction |
 |---|---|---|
 | `POST /api/verifier` | — | Retrouver un dossier par `matricule` |
-| `GET /api/referentiels` | — | Listes fermées : filières (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveaux (Licence 1 à 3) |
+| `GET /api/referentiels` | — | Listes fermées : filières (ASSRI, RIT, MIAGE, SEG, SEA, SJAP, 3EA) et niveaux (LICENCE 1 à 3) |
 | `POST /api/demander_modification` | — | Proposer une correction à valider (`409` si déjà en attente) |
 | `POST /api/partenaire/verifier` | clé d'API | **Intégrations externes** : le matricule suffit ; renvoie `verifie` et les seules données autorisées. **Lecture seule : n'inscrit jamais** |
 | `POST /api/partenaire/inscrire` | clé d'API (permission « inscription ») | Marque l'étudiant inscrit au concours, à appeler **uniquement quand le compte est effectivement créé** sur le site d'inscription (idempotent) |

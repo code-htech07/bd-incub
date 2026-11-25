@@ -11,7 +11,7 @@ from .. import audit
 from ..auth import require_admin
 from ..db import Database, get_db
 from ..errors import ApiError, respond
-from ..student_rules import FILIERES, NIVEAUX, REFERENCE_VALIDATORS, validate_matricule, validate_name
+from ..student_rules import FILIERES, NIVEAUX, REFERENCE_VALIDATORS, upper_text, validate_matricule, validate_name
 from ..student_helpers import (
     lookup_reference_id,
     byte_length,
@@ -162,7 +162,7 @@ def _validated_fields(data: dict, check_reference: bool = True) -> dict[str, Any
             max_length = 2000 if field == "allergies_affection" else 40
             if byte_length(value) > max_length:
                 raise ApiError(422, f"Le champ {field} est trop long.")
-            changes[field] = value or None
+            changes[field] = (upper_text(value) if field == "allergies_affection" else value) or None
     return changes
 
 
@@ -219,13 +219,18 @@ def request_modification(
                         try:
                             changes[field] = validator(changes[field])
                         except ValueError as error:
-                            if changes[field] != student.get(field):
+                            if str(changes[field]).upper() != str(student.get(field) or "").upper():
                                 raise ApiError(422, str(error))
+
+                def same(field: str, current, proposed) -> bool:
+                    """Même valeur ? La casse est ignorée (tout est en majuscules en base), sauf pour l'e-mail."""
+                    a, b = str(current or ""), str(proposed or "")
+                    return a == b if field == "email" else a.upper() == b.upper()
 
                 different = {
                     field: value
                     for field, value in changes.items()
-                    if str(student.get(field) or "") != str(value or "")
+                    if not same(field, student.get(field), value)
                 }
                 if not different:
                     raise ApiError(422, "Aucune différence à soumettre.")
@@ -369,6 +374,8 @@ def update_student(body: Any = Depends(json_body), db: Database = Depends(get_db
                 raise ApiError(422, "Sexe invalide (M ou F).")
         if field_type == "allergies" and byte_length(value) > 2000:
             raise ApiError(422, "Le champ allergies/affections est trop long.")
+        if field_type == "allergies":
+            value = upper_text(value)
         assignments.append(f"{field} = %s")
         parameters.append(value or None)
         changed.append(field)
@@ -452,7 +459,7 @@ def update_student(body: Any = Depends(json_body), db: Database = Depends(get_db
                         try:
                             label = REFERENCE_VALIDATORS[field](label)
                         except ValueError as error:
-                            if label != student[field]:  # valeur historique inchangée : tolérée
+                            if str(label).upper() != str(student[field] or "").upper():  # valeur historique inchangée : tolérée
                                 raise ApiError(422, str(error))
                     assignments.append(f"{field}_id = %s")
                     parameters.append(lookup_reference_id(cursor, field, label) if label else None)

@@ -31,7 +31,7 @@ def listing(client, q="Zzt"):
     "  Ouattara   Awa ",
 ])
 def test_french_alphabet_names_are_accepted(name):
-    assert validate_name(name, "Nom") == " ".join(name.replace("’", "'").split())
+    assert validate_name(name, "Nom") == " ".join(name.replace("’", "'").split()).upper()
 
 
 @pytest.mark.parametrize("name,refused", [
@@ -77,7 +77,7 @@ def test_only_nom_and_prenoms_are_required(client):
     assert body["imported"] == 2 and body["sans_matricule"] == 2 and body["matricules"] == []
     assert "sans matricule" in body["message"]
     rows = listing(client)["data"]
-    assert sorted(r["nom"] for r in rows) == ["Zztest", "Zzténé"]
+    assert sorted(r["nom"] for r in rows) == ["ZZTEST", "ZZTÉNÉ"]
     assert all(r["matricule"] is None and r["date_naissance"] is None and r["filiere"] is None
                and r["niveau"] is None and r["telephone"] is None and r["email"] is None and r["sexe"] is None
                for r in rows)
@@ -88,7 +88,7 @@ def test_each_optional_column_can_be_absent_empty_or_filled(client, column):
     """Chaque colonne facultative : absente du fichier, présente mais vide, ou renseignée."""
     values = {
         "matricule": "ZZTO1703980001", "date_naissance": "17/03/1998", "filiere": "RIT",
-        "niveau": "Licence 1", "telephone": "0102030405", "email": "o@exemple.ci", "sexe": "F",
+        "niveau": "LICENCE 1", "telephone": "0102030405", "email": "o@exemple.ci", "sexe": "F",
         "allergies_affection": "Arachides",
     }
     assert import_csv(client, "nom;prenoms\nZztest;Absente\n").status_code == 201
@@ -127,7 +127,7 @@ def test_matricule_is_imported_as_is_never_computed(client):
     assert response.status_code == 201, response.text
     assert response.json()["matricules"] == ["ZZTA1703980001", "ZZTQ0101000007"]
     assert response.json()["sans_matricule"] == 0
-    assert student(client, "ZZTQ0101000007")["prenoms"] == "Bob"
+    assert student(client, "ZZTQ0101000007")["prenoms"] == "BOB"
     assert student(client, "ZZTA1703980001")["date_naissance"] == "1998-03-17"
 
 
@@ -182,16 +182,16 @@ def test_a_matricule_can_be_assigned_later_and_changed_by_the_admin(client):
     assert update("pas-un-matricule").status_code == 422
     response = update("zzta1703980001")
     assert response.status_code == 200 and response.json()["data"] == {"matricule": "ZZTA1703980001"}
-    assert student(client, "ZZTA1703980001")["nom"] == "Zztest"
+    assert student(client, "ZZTA1703980001")["nom"] == "ZZTEST"
     assert update("ZZTA1703980001").status_code == 200  # même valeur : sans effet
     response = update("ZZTB0205990001")  # un matricule déjà attribué peut être modifié par l'administrateur
     assert response.status_code == 200 and response.json()["data"] == {"matricule": "ZZTB0205990001"}
     assert client.post("/api/verifier", json={"matricule": "ZZTA1703980001"}).status_code == 404
-    assert student(client, "ZZTB0205990001")["nom"] == "Zztest"
+    assert student(client, "ZZTB0205990001")["nom"] == "ZZTEST"
     assert update("ZZTA1703980001").status_code == 200  # et être rétabli
     # Un matricule déjà pris par un autre étudiant : 409
     assert import_csv(client, "nom;prenoms\nZztest;Bob\n").status_code == 201
-    bob = [r for r in listing(client)["data"] if r["prenoms"] == "Bob"][0]
+    bob = [r for r in listing(client)["data"] if r["prenoms"] == "BOB"][0]
     response = client.post("/api/update_etudiant", json={"id": bob["id"], "matricule": "ZZTA1703980001"})
     assert response.status_code == 409 and "existe déjà" in response.json()["message"]
 
@@ -245,7 +245,7 @@ def test_import_template_matches_the_importer(client):
     assert body["imported"] == 3 and body["sans_matricule"] == 1  # le 3e exemple n'a pas de matricule
     assert body["matricules"] == ["ZZTA1703980001", "ZZTA2005000001"]
     alain = student(client, "ZZTA1703980001")
-    assert alain["prenoms"] == "Alain" and alain["filiere"] == "ASSRI" and alain["niveau"] == "Licence 3"
+    assert alain["prenoms"] == "ALAIN" and alain["filiere"] == "ASSRI" and alain["niveau"] == "LICENCE 3"
     assert student(client, "ZZTA2005000001")["date_naissance"] is None  # la date reste facultative
 
 
@@ -265,7 +265,7 @@ def test_candidate_requests_apply_the_same_rules(client):
     assert approved.status_code == 200, approved.text
     assert approved.json()["matricule"] == "ZZTI0101000001"
     created = student(client, "ZZTI0101000001")
-    assert created["nom"] == "Zztnodate" and created["date_naissance"] is None
+    assert created["nom"] == "ZZTNODATE" and created["date_naissance"] is None
     # Matricule déjà pris : 409 ; un homonyme avec un autre matricule est une autre personne
     assert client.post(url_create, json=base).status_code == 409
     assert client.post(url_create, json={**base, "matricule": "ZZTI0202000002"}).status_code == 201
@@ -294,4 +294,4 @@ def test_corrections_never_change_the_matricule(client):
     approve({"prenoms": "Zoé"})  # même changement d'initiale : le matricule reste
     approve({"date_naissance": "1990-05-05"})  # une date différente de celle du matricule : acceptée
     final = student(client, "ZZTA1703980001")
-    assert final["nom"] == "Zztesu" and final["prenoms"] == "Zoé" and final["date_naissance"] == "1990-05-05"
+    assert final["nom"] == "ZZTESU" and final["prenoms"] == "ZOÉ" and final["date_naissance"] == "1990-05-05"

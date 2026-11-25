@@ -41,7 +41,7 @@ def test_create_student_only_nom_and_prenoms_required(client):
     response = create(client)
     assert response.status_code == 201, response.text
     created = response.json()["data"]
-    assert created["nom"] == "Zztest" and created["prenoms"] == "Alice" and created["id"]
+    assert created["nom"] == "ZZTEST" and created["prenoms"] == "ALICE" and created["id"]
     assert all(created[k] is None for k in ("matricule", "date_naissance", "filiere", "niveau", "telephone",
                                              "email", "sexe", "allergies_affection", "numero_candidat"))
     assert listing(client)["total"] == 1
@@ -49,14 +49,14 @@ def test_create_student_only_nom_and_prenoms_required(client):
 
 def test_create_student_with_every_field(client):
     response = create(
-        client, matricule=" zzta1703980001 ", date_naissance="17/03/1998", filiere="RIT", niveau="Licence 2",
+        client, matricule=" zzta1703980001 ", date_naissance="17/03/1998", filiere="RIT", niveau="LICENCE 2",
         telephone="0701020304", email="alice@exemple.ci", sexe="f", allergies_affection="Arachides",
     )
     assert response.status_code == 201, response.text
     data = student(client, "ZZTA1703980001")
-    assert data["nom"] == "Zztest" and data["date_naissance"] == "1998-03-17" and data["filiere"] == "RIT"
-    assert data["niveau"] == "Licence 2" and data["sexe"] == "F" and data["telephone"] == "0701020304"
-    assert data["email"] == "alice@exemple.ci" and data["allergies_affection"] == "Arachides"
+    assert data["nom"] == "ZZTEST" and data["date_naissance"] == "1998-03-17" and data["filiere"] == "RIT"
+    assert data["niveau"] == "LICENCE 2" and data["sexe"] == "F" and data["telephone"] == "0701020304"
+    assert data["email"] == "alice@exemple.ci" and data["allergies_affection"] == "ARACHIDES"
 
 
 @pytest.mark.parametrize("body,fragment", [
@@ -92,28 +92,28 @@ def test_create_student_duplicates(client):
 # ------------------------------------------------------------------ modification de tous les champs
 def test_every_field_can_be_edited_and_cleared(client):
     assert create(client, matricule="ZZTA1703980001", date_naissance="1998-03-17", filiere="RIT",
-                  niveau="Licence 2", telephone="0701020304", email="alice@exemple.ci", sexe="F",
+                  niveau="LICENCE 2", telephone="0701020304", email="alice@exemple.ci", sexe="F",
                   allergies_affection="Arachides").status_code == 201
     row = listing(client)["data"][0]
     update = lambda **fields: client.post("/api/update_etudiant", json={"id": row["id"], **fields})  # noqa: E731
 
     response = update(nom="Zztesu", prenoms="Béatrice", matricule="zztb0205990001", date_naissance="02/05/1999",
-                      filiere="ASSRI", niveau="Licence 3", telephone="0102030405", email="b@exemple.ci",
+                      filiere="ASSRI", niveau="LICENCE 3", telephone="0102030405", email="b@exemple.ci",
                       sexe="m", allergies_affection="Pénicilline")
     assert response.status_code == 200, response.text
     assert response.json()["data"] == {"matricule": "ZZTB0205990001"}
     assert client.post("/api/verifier", json={"matricule": "ZZTA1703980001"}).status_code == 404  # ancien matricule libéré
     data = student(client, "ZZTB0205990001")
-    assert (data["nom"], data["prenoms"], data["date_naissance"]) == ("Zztesu", "Béatrice", "1999-05-02")
-    assert (data["filiere"], data["niveau"], data["telephone"]) == ("ASSRI", "Licence 3", "0102030405")
-    assert (data["email"], data["sexe"], data["allergies_affection"]) == ("b@exemple.ci", "M", "Pénicilline")
+    assert (data["nom"], data["prenoms"], data["date_naissance"]) == ("ZZTESU", "BÉATRICE", "1999-05-02")
+    assert (data["filiere"], data["niveau"], data["telephone"]) == ("ASSRI", "LICENCE 3", "0102030405")
+    assert (data["email"], data["sexe"], data["allergies_affection"]) == ("b@exemple.ci", "M", "PÉNICILLINE")
 
     # Une chaîne vide efface chaque champ facultatif (date, filière, niveau, téléphone, e-mail, sexe, allergies)
     response = update(date_naissance="", filiere="", niveau="", telephone="", email="", sexe="", allergies_affection="")
     assert response.status_code == 200 and response.json()["data"] == {}
     data = student(client, "ZZTB0205990001")
     assert all(data[k] is None for k in ("date_naissance", "filiere", "niveau", "telephone", "email", "sexe", "allergies_affection"))
-    assert data["nom"] == "Zztesu"  # nom et prénoms restent
+    assert data["nom"] == "ZZTESU"  # nom et prénoms restent
     # Un seul champ suffit ; renvoyer le même matricule est sans effet
     assert update(telephone="0909090909").status_code == 200
     response = update(matricule="ZZTB0205990001")
@@ -123,7 +123,7 @@ def test_every_field_can_be_edited_and_cleared(client):
 def test_edit_validation_and_conflicts(client):
     assert create(client, matricule="ZZTA1703980001").status_code == 201
     assert create(client, prenoms="Bob", matricule="ZZTB0205990001").status_code == 201
-    alice = [r for r in listing(client)["data"] if r["prenoms"] == "Alice"][0]
+    alice = [r for r in listing(client)["data"] if r["prenoms"] == "ALICE"][0]
     update = lambda **fields: client.post("/api/update_etudiant", json={"id": alice["id"], **fields})  # noqa: E731
     assert update(matricule="ZZTB0205990001").status_code == 409  # déjà pris par Bob
     assert update(matricule="nope").status_code == 422
@@ -134,7 +134,7 @@ def test_edit_validation_and_conflicts(client):
     assert update(numero_candidat="N-1").status_code == 422  # pas inscrit
     assert update().status_code == 400
     assert client.post("/api/update_etudiant", json={"id": 999999, "nom": "Zztest"}).status_code == 404
-    assert student(client, "ZZTA1703980001")["prenoms"] == "Alice"  # rien n'a été modifié
+    assert student(client, "ZZTA1703980001")["prenoms"] == "ALICE"  # rien n'a été modifié
 
 
 def test_candidate_number_is_editable_for_registered_students(client):
@@ -160,8 +160,8 @@ def test_unregister_student_from_the_dashboard(client):
     response = client.post("/api/admin_desinscrire", json={"id": alice["id"]})
     assert response.status_code == 200 and response.json()["message"] == "Étudiant désinscrit du concours."
     after = [r for r in listing(client)["data"] if r["matricule"] == "ZZTA1703980001"][0]
-    assert after["numero_candidat"] is None and after["nom"] == "Zztest"  # dossier conservé
-    assert student(client, "ZZTA1703980001")["prenoms"] == "Alice"
+    assert after["numero_candidat"] is None and after["nom"] == "ZZTEST"  # dossier conservé
+    assert student(client, "ZZTA1703980001")["prenoms"] == "ALICE"
     report = client.get("/api/pointage", params={"date": "2026-06-10"}).json()
     assert [r["matricule"] for r in report["data"]] == ["ZZTA1703980001"]  # historique de pointage conservé
     # Déjà désinscrit / jamais inscrit / identifiant invalide

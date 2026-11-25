@@ -31,8 +31,13 @@ MATRICULE_RULE = (
 )
 
 
+def upper_text(value):
+    """Texte libre (ex. allergies) en majuscules ; les valeurs non texte sont rendues telles quelles."""
+    return value.upper() if isinstance(value, str) else value
+
+
 def validate_name(value, label: str) -> str:
-    """Retourne le nom nettoyé (espaces réduits, apostrophe typographique normalisée) ou lève ValueError."""
+    """Nom nettoyé (espaces réduits, apostrophe normalisée) EN MAJUSCULES, ou lève ValueError."""
     if value is None:
         raise ValueError(f"{label} obligatoire.")
     if not isinstance(value, str):
@@ -53,7 +58,7 @@ def validate_name(value, label: str) -> str:
         raise ValueError(f"{label} invalide : doit commencer et finir par une lettre.")
     if byte_length(cleaned) > 150:
         raise ValueError(f"{label} trop long (150 caractères maximum).")
-    return cleaned
+    return cleaned.upper()  # toujours en majuscules en base, quelle que soit la saisie
 
 
 def validate_matricule(value) -> str:
@@ -115,7 +120,7 @@ def index_find(index: dict, nom: str, prenoms: str, birth_iso: str | None):
 # ---------------------------------------------------------------------------- filières et niveaux
 # Listes fermées : une seule source de vérité (aussi publiée par GET /api/referentiels pour les pages).
 FILIERES = ("ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA")
-NIVEAUX = ("Licence 1", "Licence 2", "Licence 3")
+NIVEAUX = ("LICENCE 1", "LICENCE 2", "LICENCE 3")
 
 
 def _reference(value, allowed: tuple[str, ...], label: str, feminine: bool) -> str | None:

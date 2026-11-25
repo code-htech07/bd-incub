@@ -27,6 +27,7 @@ from ..student_helpers import byte_length
 from ..student_rules import (
     best_name_match,
     load_students_for_matching,
+    name_comparison,
     name_key,
     upper_text,
     name_level,
@@ -244,8 +245,8 @@ def _name_check(request: dict) -> dict | None:
         return None
     nom = changes.get("nom") or request["nom"]
     prenoms = changes.get("prenoms") or request["prenoms"]
-    score = name_similarity(str(nom), str(prenoms), request["nom"], request["prenoms"])
-    return {"score": score, "niveau": name_level(score)}
+    score, level = name_comparison(str(nom), str(prenoms), request["nom"], request["prenoms"])
+    return {"score": score, "niveau": level}
 
 
 def _db_failure(error: BaseException, message: str) -> ApiError:
@@ -831,10 +832,14 @@ def _creation_match(known: list[dict], fields) -> dict | None:
     found = best_name_match(known, str(fields["nom"]), str(fields["prenoms"]), str(fields.get("date_naissance") or "") or None)
     if not found:
         return None
-    row, score = found
+    row, score, level = found
+    birth = str(fields.get("date_naissance") or "") or None
+    same_birth = bool(birth and row["date_naissance"] and birth == str(row["date_naissance"]))
     return {
         "etudiant_id": row["id"], "matricule": row["matricule"], "nom": row["nom"], "prenoms": row["prenoms"],
-        "score": score, "niveau": name_level(score), "a_completer": not row["matricule"],
+        "score": score, "niveau": level,
+        # Vrai si l'approbation complèterait ce dossier (mêmes règles que la fusion à l'approbation)
+        "a_completer": not row["matricule"] and (level != "partiel" or same_birth),
     }
 
 

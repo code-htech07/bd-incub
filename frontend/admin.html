@@ -2664,15 +2664,22 @@
                 const c = request.correspondance;
                 if (!c) return '<p class="name-check warn">Aucun étudiant de ce nom n’est en base : l’approbation créera un nouveau dossier.</p>';
                 const qui = `${esc(c.nom)} ${esc(c.prenoms)}`;
+                // « partiel » : prénoms en plus ou en moins (ex. « KOUASSI FRANCK » pour « KOUASSI OI AMANY FRANCK ABEL »)
+                const quel = c.niveau === 'identique' ? 'identique'
+                    : c.niveau === 'proche' ? `proche (${pourcent(c.score)}, faute de frappe)`
+                    : `<b>partiellement identique</b> (prénoms en plus ou en moins, ${pourcent(c.score)})`;
                 if (c.a_completer) {
-                    return `<p class="name-check ok">Nom ${c.niveau === 'identique' ? 'retrouvé' : 'proche retrouvé (' + pourcent(c.score) + ')'} en base : <b>${qui}</b>, sans matricule. L’approbation complétera ce dossier (nom et prénoms saisis fusionnés) au lieu d’en créer un nouveau.</p>`;
+                    return `<p class="name-check ok">Nom ${quel} retrouvé en base : <b>${qui}</b>, sans matricule. L’approbation complétera ce dossier (nom et prénoms saisis fusionnés) au lieu d’en créer un nouveau.</p>`;
                 }
-                return `<p class="name-check warn">Un étudiant de nom ${c.niveau === 'identique' ? 'identique' : 'proche (' + pourcent(c.score) + ')'} existe déjà avec le matricule <b>${esc(c.matricule)}</b> (${qui}) : vérifiez une faute de saisie du matricule avant d’approuver.</p>`;
+                if (!c.matricule) {
+                    return `<p class="name-check warn">Un dossier sans matricule a un nom ${quel} : <b>${qui}</b>. Il ne sera pas complété automatiquement (prénoms incomplets et date de naissance non confirmée) : l’approbation créera un nouveau dossier. Refusez la demande si c’est la même personne et demandez-lui son nom complet.</p>`;
+                }
+                return `<p class="name-check warn">Un étudiant de nom ${quel} existe déjà avec le matricule <b>${esc(c.matricule)}</b> (${qui}). ${c.niveau === 'partiel' ? 'Ce peut être une autre personne (homonyme) ou la même avec un matricule mal saisi' : 'Vérifiez une faute de saisie du matricule'} avant d’approuver.</p>`;
             }
             const v = request.verification_noms;
             if (!v) return '';
             if (v.niveau === 'different') return `<p class="name-check warn">Le nom proposé ne ressemble pas à celui en base (${pourcent(v.score)}) : vérifiez avant d’approuver.</p>`;
-            return `<p class="name-check ok">Nom proposé ${v.niveau === 'identique' ? 'identique à' : 'proche de (' + pourcent(v.score) + ')'} celui en base : simple correction.</p>`;
+            return `<p class="name-check ok">Nom proposé ${v.niveau === 'identique' ? 'identique à' : v.niveau === 'partiel' ? 'partiellement identique à (prénoms en plus ou en moins)' : 'proche de (' + pourcent(v.score) + ')'} celui en base : simple correction.</p>`;
         }
 
         function texteMail(data) {

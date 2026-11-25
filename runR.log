@@ -1,9 +1,105 @@
-....................................................                     [100%]
+...........................E.............                                [100%]
+=================================== ERRORS ====================================
+_ ERROR at setup of test_submission_tells_the_student_about_the_email_and_the_12h_delay _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D144DEC130>
+
+    @pytest.fixture()
+    def client(monkeypatch):
+        monkeypatch.setenv("UPB_SECRET_KEY", SECRET)
+>       cleanup()
+
+tests\test_db_flow.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_db_flow.py:28: in cleanup
+    with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cls = <class 'psycopg.Connection'>
+conninfo = 'user=neondb_owner password=npg_o5yJ8rIBQgXL channel_binding=require dbname=neondb host=ep-dry-fire-beuubdzo-pooler.c-9.us-east-2.aws.neon.tech sslmode=require hostaddr=77.113.7.222'
+autocommit = False, prepare_threshold = None, context = None, row_factory = None
+cursor_factory = None, kwargs = {}
+params = {'channel_binding': 'require', 'dbname': 'neondb', 'host': 'ep-dry-fire-beuubdzo-pooler.c-9.us-east-2.aws.neon.tech', 'password': 'npg_o5yJ8rIBQgXL', ...}
+timeout = 130
+
+    @classmethod
+    def connect(
+        cls,
+        conninfo: str = "",
+        *,
+        autocommit: bool = False,
+        prepare_threshold: int | None = 5,
+        context: AdaptContext | None = None,
+        row_factory: RowFactory[Row] | None = None,
+        cursor_factory: type[Cursor[Row]] | None = None,
+        **kwargs: ConnParam,
+    ) -> Self:
+        """
+        Connect to a database server and return a new `Connection` instance.
+        """
+    
+        params = cls._get_connection_params(conninfo, **kwargs)
+        timeout = timeout_from_conninfo(params)
+        rv = None
+        attempts = conninfo_attempts(params)
+        conn_errors: list[tuple[e.Error, str]] = []
+        for attempt in attempts:
+            tdescr = (attempt.get("host"), attempt.get("port"), attempt.get("hostaddr"))
+            descr = "host: %r, port: %r, hostaddr: %r" % tdescr
+            logger.debug("connection attempt: %s", descr)
+            try:
+                conninfo = make_conninfo("", **attempt)
+                gen = cls._connect_gen(conninfo)
+                rv = waiting.wait_conn(gen, interval=_WAIT_INTERVAL, timeout=timeout)
+            except e._WaitTimeout:
+                tex = e.ConnectionTimeout("connection timeout expired")
+                logger.debug("connection failed: %s: %s", descr, str(tex))
+                conn_errors.append((tex, descr))
+            except e.Error as ex:
+                logger.debug("connection failed: %s: %s", descr, str(ex))
+                conn_errors.append((ex, descr))
+            except e._NO_TRACEBACK as ex:
+                raise ex.with_traceback(None)
+            else:
+                logger.debug("connection succeeded: %s", descr)
+                break
+    
+        if not rv:
+            last_ex = conn_errors[-1][0]
+            if len(conn_errors) == 1:
+                raise last_ex.with_traceback(None)
+    
+            # Create a new exception with the same type as the last one, containing
+            # all attempt errors while preserving backward compatibility.
+            lines = [str(last_ex)]
+            lines.append("Multiple connection attempts failed. All failures were:")
+            lines.extend((f"- {descr}: {error}" for error, descr in conn_errors))
+            new_ex = type(last_ex)("\n".join(lines), pgconn=last_ex.pgconn)
+>           raise new_ex.with_traceback(None)
+E           psycopg.OperationalError: connection failed: connection to server at "77.113.7.222", port 5432 failed: Network is unreachable (0x00002743/10051)
+E           	Is the server running on that host and accepting TCP/IP connections?
+E           Multiple connection attempts failed. All failures were:
+E           - host: 'ep-dry-fire-beuubdzo-pooler.c-9.us-east-2.aws.neon.tech', port: None, hostaddr: '3.147.219.177': connection failed: connection to server at "3.147.219.177", port 5432 failed: server closed the connection unexpectedly
+E           	This probably means the server terminated abnormally
+E           	before or while processing the request.
+E           - host: 'ep-dry-fire-beuubdzo-pooler.c-9.us-east-2.aws.neon.tech', port: None, hostaddr: '77.113.120.60': connection failed: connection to server at "77.113.120.60", port 5432 failed: server closed the connection unexpectedly
+E           	This probably means the server terminated abnormally
+E           	before or while processing the request.
+E           server closed the connection unexpectedly
+E           	This probably means the server terminated abnormally
+E           	before or while processing the request.
+E           - host: 'ep-dry-fire-beuubdzo-pooler.c-9.us-east-2.aws.neon.tech', port: None, hostaddr: '77.113.7.222': connection failed: connection to server at "77.113.7.222", port 5432 failed: Network is unreachable (0x00002743/10051)
+E           	Is the server running on that host and accepting TCP/IP connections?
+
+.venv\Lib\site-packages\psycopg\connection.py:134: OperationalError
 ============================== warnings summary ===============================
 .venv\Lib\site-packages\fastapi\testclient.py:1
   D:\projet-dev\bd-incub\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-52 passed, 1 warning in 180.37s (0:03:00)
+=========================== short test summary info ===========================
+ERROR tests/test_mail_and_names.py::test_submission_tells_the_student_about_the_email_and_the_12h_delay
+40 passed, 1 warning, 1 error in 216.15s (0:03:36)
 finished

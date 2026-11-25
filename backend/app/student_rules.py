@@ -188,8 +188,26 @@ def name_similarity(nom_a: str, prenoms_a: str, nom_b: str, prenoms_b: str) -> f
 
 
 def name_level(score: float) -> str:
-    """« identique », « proche » (faute légère tolérée) ou « different »."""
+    """« identique », « proche » (faute légère tolérée) ou « different » d'après le score seul."""
     return "identique" if score >= 0.999 else "proche" if score >= NAME_TOLERANCE else "different"
+
+
+def name_comparison(nom_a: str, prenoms_a: str, nom_b: str, prenoms_b: str) -> tuple[float, str]:
+    """(score, niveau) ; un prénom en trop ou en moins donne « partiel », jamais « identique ».
+
+    « identique » : mêmes mots (ordre indifférent) ; « proche » : mêmes mots à une faute de frappe près ;
+    « partiel » : une des deux versions a des prénoms ou des mots en plus (ex. « KOUASSI FRANCK » pour
+    « KOUASSI OI AMANY FRANCK ABEL ») : la ressemblance ne prouve pas qu'il s'agit de la même personne ;
+    « different » : ressemblance insuffisante."""
+    score = name_similarity(nom_a, prenoms_a, nom_b, prenoms_b)
+    if score < NAME_TOLERANCE:
+        return score, "different"
+    if len(_tokens(nom_a)) != len(_tokens(nom_b)) or len(_tokens(prenoms_a)) != len(_tokens(prenoms_b)):
+        return score, "partiel"
+    return score, "identique" if score >= 0.999 else "proche"
+
+
+_LEVEL_RANK = {"identique": 3, "proche": 2, "partiel": 1}
 
 
 def load_students_for_matching(cursor) -> list[dict]:
@@ -198,10 +216,12 @@ def load_students_for_matching(cursor) -> list[dict]:
 
 
 def best_name_match(rows: list[dict], nom: str, prenoms: str, birth_iso: str | None = None, without_matricule: bool = False):
-    """(ligne, score) du dossier existant dont le nom ressemble le plus (>= tolérance), sinon None.
+    """(ligne, score, niveau) du dossier existant dont le nom ressemble le plus (>= tolérance), sinon None.
 
-    Deux dates de naissance connues et différentes excluent le rapprochement. À score égal, un dossier sans
-    matricule est préféré ; `without_matricule=True` ne considère que ceux-là (dossiers à compléter)."""
+    Deux dates de naissance connues et différentes excluent le rapprochement. Les noms « identique » et « proche » passent
+    avant les « partiel » ; à égalité, un dossier sans matricule est préféré. `without_matricule=True` (dossiers à compléter à
+    l'approbation) ne considère que les dossiers sans matricule et n'accepte un nom « partiel » que si les deux dates de
+    naissance sont connues et égales."""
     best = None
     for row in rows:
         if without_matricule and row["matricule"]:
@@ -209,10 +229,12 @@ def best_name_match(rows: list[dict], nom: str, prenoms: str, birth_iso: str | N
         existing = str(row["date_naissance"]) if row["date_naissance"] else None
         if birth_iso and existing and birth_iso != existing:
             continue
-        score = name_similarity(nom, prenoms, row["nom"], row["prenoms"])
-        if score < NAME_TOLERANCE:
+        score, level = name_comparison(nom, prenoms, row["nom"], row["prenoms"])
+        if level == "different":
             continue
-        rank = (score, not row["matricule"])
+        if without_matricule and level == "partiel" and not (birth_iso and existing and birth_iso == existing):
+            continue
+        rank = (_LEVEL_RANK[level], score, not row["matricule"])
         if best is None or rank > best[0]:
-            best = (rank, row, score)
-    return (best[1], best[2]) if best else None
+            best = (rank, row, score, level)
+    return (best[1], best[2], best[3]) if best else None

@@ -7,20 +7,21 @@ import pytest
 from test_db_flow import client, import_csv, skip_if_real_requests_pending, student  # noqa: F401
 
 from app import mailer
-from app.student_rules import best_name_match, name_level, name_similarity
+from app.student_rules import best_name_match, name_comparison, name_level, name_similarity
 
 
 # ------------------------------------------------------------------ règles de ressemblance (sans base)
 @pytest.mark.parametrize("a,b,level", [
     (("Kouamé", "Aline Marie"), ("KOUAME", "aline marie"), "identique"),
     (("Konan", "Aline"), ("Konane", "Alyne"), "proche"),          # fautes légères
-    (("Konan", "Aline Marie"), ("Konan", "Aline"), "identique"),  # prénom en moins : toléré
+    (("Konan", "Aline Marie"), ("Konan", "Aline"), "partiel"),  # prénom en moins : plus « identique »
     (("Konan", "Marie Aline"), ("Konan", "Aline Marie"), "identique"),  # ordre des prénoms indifférent
     (("Konan", "Aline"), ("Traore", "Aline"), "different"),
     (("Konan", "Aline"), ("Konan", "Moussa"), "different"),
 ])
 def test_name_similarity_levels(a, b, level):
-    assert name_level(name_similarity(*a, *b)) == level
+    assert name_comparison(*a, *b)[1] == level
+    assert name_level(name_similarity(*a, *b)) in ("identique", "proche", "different")
 
 
 def test_best_match_prefers_records_without_matricule_and_respects_birth_dates():
@@ -30,6 +31,7 @@ def test_best_match_prefers_records_without_matricule_and_respects_birth_dates()
         {"id": 3, "matricule": None, "nom": "Konan", "prenoms": "Aline", "date_naissance": "2000-01-01"},
     ]
     assert best_name_match(rows, "Konan", "Aline")[0]["id"] == 2
+    assert best_name_match(rows, "Konan", "Aline")[2] == "identique"
     assert best_name_match(rows, "Konan", "Aline", "2000-01-01")[0]["id"] == 2
     assert best_name_match(rows, "Konan", "Aline", "1999-05-05")[0]["id"] == 2  # id 3 exclu : dates différentes
     assert best_name_match(rows, "Konan", "Aline", without_matricule=True)[0]["id"] == 2
@@ -458,3 +460,57 @@ def test_portal_submit_button_stops_spinning_and_the_form_is_cleared():
     # Une nouvelle vérification restaure le formulaire et le bouton
     reset = page[page.index("function definirMode"):page.index("function setStep")]
     assert "classList.remove('sent', 'loading')" in reset and "profile-fields')" in reset
+
+
+# ------------------------------------------------------------------ « identique » ne se dit plus d'un nom incomplet
+@pytest.mark.parametrize("prenoms", ["FRANCK", "ABEL", "OI", "AMANY FRANCK", "OI AMANY"])
+def test_a_subset_of_the_first_names_is_partial_never_identical(prenoms):
+    base = ("KOUASSI", "OI AMANY FRANCK ABEL")
+    score, level = name_comparison("KOUASSI", prenoms, *base)
+    assert level == "partiel" and score >= 0.8
+    assert name_comparison("KOUASSI", "OI AMANY FRANCK ABEL", *base) == (1.0, "identique")
+    assert name_comparison("kouassi", "abel franck amany oi", *base)[1] == "identique"  # ordre et casse indifférents
+    assert name_comparison("KOUASSI", "OI AMANY FRANCK ABELL", *base)[1] == "proche"  # une faute de frappe
+
+
+def test_partial_match_never_completes_a_record_without_a_confirmed_birth_date():
+    rows = [{"id": 1, "matricule": None, "nom": "KOUASSI", "prenoms": "OI AMANY FRANCK ABEL", "date_naissance": None},
+            {"id": 2, "matricule": None, "nom": "KOUASSI", "prenoms": "OI AMANY FRANCK ABEL", "date_naissance": "2003-10-07"}]
+    # Mode « compléter à l'approbation » : un nom partiel n'est accepté que si les deux dates sont connues et égales
+    assert best_name_match(rows[:1], "KOUASSI", "FRANCK", None, without_matricule=True) is None
+    assert best_name_match(rows[:1], "KOUASSI", "FRANCK", "2003-10-07", without_matricule=True) is None  # date inconnue en base
+    found = best_name_match(rows, "KOUASSI", "FRANCK", "2003-10-07", without_matricule=True)
+    assert found[0]["id"] == 2 and found[2] == "partiel"
+    # Un nom complet reste complétable sans date
+    assert best_name_match(rows[:1], "KOUASSI", "OI AMANY FRANCK ABEL", None, without_matricule=True)[2] == "identique"
+    # Hors fusion (simple avertissement), le partiel est signalé mais après les correspondances complètes
+    both = rows + [{"id": 3, "matricule": "KOUO0310070001", "nom": "KOUASSI", "prenoms": "FRANCK", "date_naissance": None}]
+    assert best_name_match(both, "KOUASSI", "FRANCK")[0]["id"] == 3
+
+
+def test_creation_request_flags_a_partial_name_and_does_not_merge_it(client):
+    created = client.post("/api/admin_etudiants", json={"nom": "ZZTKOUASSI", "prenoms": "OI AMANY FRANCK ABEL", "matricule": "ZZTO0310070001"})
+    assert created.status_code == 201, created.text
+    # Demande avec un autre matricule et un seul prénom : signalée « partiel » vers le dossier qui a un matricule
+    pending = submit_creation(client, matricule="ZZTP0310070002", nom="Zztkouassi", prenoms="Franck")
+    match = pending["correspondance"]
+    assert match["niveau"] == "partiel" and match["matricule"] == "ZZTO0310070001" and match["a_completer"] is False
+    # Sans matricule en base : un nom partiel n'est pas complété sans date de naissance confirmée
+    other = client.post("/api/admin_etudiants", json={"nom": "ZZTDAGO", "prenoms": "AYA MARIE JOSEE"})
+    assert other.status_code == 201, other.text
+    pending = submit_creation(client, matricule="ZZTQ0101000003", nom="Zztdago", prenoms="Aya")
+    assert pending["correspondance"]["niveau"] == "partiel" and pending["correspondance"]["a_completer"] is False
+    data = client.post("/api/admin_creations", json={"id": pending["id"], "action": "approve"}).json()
+    assert data["fusion"] is False  # un nouveau dossier est créé, l'existant n'est pas modifié
+    assert student(client, "ZZTQ0101000003")["nom"] == "ZZTDAGO"
+    names = [(r["nom"], r["prenoms"], r["matricule"]) for r in client.get("/api/get_etudiants", params={"q": "ZZTDAGO"}).json()["data"]]
+    assert ("ZZTDAGO", "AYA MARIE JOSEE", None) in names and ("ZZTDAGO", "AYA", "ZZTQ0101000003") in names
+    # Complet : complété sans doublon
+    pending = submit_creation(client, matricule="ZZTR0101000004", nom="Zztdago", prenoms="Aya Marie Josee")
+    assert pending["correspondance"]["niveau"] == "identique" and pending["correspondance"]["a_completer"] is True
+
+
+def test_admin_page_words_partial_names_carefully():
+    from pathlib import Path
+    page = (Path(__file__).resolve().parents[2] / "frontend" / "admin.html").read_text(encoding="utf-8")
+    assert "partiellement identique" in page and "prénoms en plus ou en moins" in page

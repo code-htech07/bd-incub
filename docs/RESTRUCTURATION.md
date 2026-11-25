@@ -623,3 +623,18 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
 - Tests : tout test qui appelle `/api/admin_approve_all` (qui approuve **toutes** les demandes en attente de la base) commence par
   `skip_if_real_requests_pending()` et ne s'exécute pas s'il existe une demande réelle, pour ne jamais approuver les demandes
   d'essai faites à la main sur la base de développement.
+
+## Étape 26 — Comparaison des noms : « partiel » n'est plus « identique »
+
+- **Défaut corrigé** : la comparaison n'écartait pas un prénom en trop ou en moins. Une demande « KOUASSI FRANCK » (ou même
+  « KOUASSI OI ») ressortait « identique » à un dossier « KOUASSI OI AMANY FRANCK ABEL », et l'avertissement disait « Un étudiant
+  de nom identique existe déjà avec le matricule… » : trompeur, surtout avec un nom de famille courant.
+- **Nouveaux niveaux** (`name_comparison`) : `identique` (mêmes mots, ordre et casse indifférents), `proche` (mêmes mots à une faute
+  de frappe près), `partiel` (prénoms en plus ou en moins : ressemblance, pas preuve), `different`.
+- **Complétion à l'approbation** : un nom `partiel` ne complète un dossier sans matricule que si **les deux dates de naissance sont
+  connues et égales** ; sinon un nouveau dossier est créé (aucun dossier existant n'est modifié par erreur). `identique` et
+  `proche` se complètent comme avant. À niveau égal, les correspondances complètes passent avant les partielles.
+- **Page d'administration** : textes distincts (« partiellement identique (prénoms en plus ou en moins) », « peut être un
+  homonyme ou la même personne avec un matricule mal saisi », « ne sera pas complété automatiquement… »). Les corrections qui
+  touchent au nom affichent aussi le niveau `partiel`.
+- Tests : `tests/test_mail_and_names.py`. Aucun changement de schéma.

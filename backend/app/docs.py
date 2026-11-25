@@ -133,6 +133,11 @@ class UpdatePhoneBody(BaseModel):
 class ProcessModificationBody(BaseModel):
     id: int = Field(ge=1, description="Identifiant de la demande.")
     action: Literal["approve", "reject"]
+    commentaire: str | None = Field(
+        default=None, max_length=500,
+        description="Motif du refus (facultatif, `reject` uniquement) : envoyé à l'étudiant dans l'e-mail de refus.",
+        examples=["Votre nom ne correspond pas à celui de votre carte d'étudiant."],
+    )
 
 
 class AttendanceBody(BaseModel):

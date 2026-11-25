@@ -378,13 +378,17 @@ def test_schema_problems_detects_missing_migrations():
             return self.rows
 
     full = [("pointage_journalier", "id", "NO"), ("etudiant", "email", "YES"), ("etudiant", "matricule", "YES"),
-            ("etudiant_modification", "id", "NO"), ("etudiant_creation_demande", "id", "NO"),
+            ("etudiant_modification", "id", "NO"), ("etudiant_modification", "commentaire", "YES"),
+            ("etudiant_creation_demande", "id", "NO"),
             ("administrateur", "id", "NO"), ("partenaire", "id", "NO"), ("journal_activite", "id", "NO"),
             ("partenaire_cle", "id", "NO")]
     assert db.schema_problems(FakeConnection(full)) == []
     # Base de production restée avant la migration 09 : matricule encore NOT NULL
     outdated = [(t, c, "NO" if (t, c) == ("etudiant", "matricule") else n) for t, c, n in full]
     assert db.schema_problems(FakeConnection(outdated)) == ["09_matricule_facultatif.sql"]
+    # Base restée avant la migration 10 : pas de colonne « commentaire »
+    no_comment = [r for r in full if r[1] != "commentaire"]
+    assert db.schema_problems(FakeConnection(no_comment)) == ["10_commentaire_refus.sql"]
     # Tables des migrations 07 et 08 absentes
     partial = [r for r in full if r[0] not in ("journal_activite", "partenaire_cle")]
     assert db.schema_problems(FakeConnection(partial)) == ["07_journal_activite.sql", "08_integrations.sql"]

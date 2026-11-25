@@ -562,6 +562,7 @@
         .row-btn.danger{color:#8c2630;border-color:#e6c3c7}
         .row-btn.danger:hover{background:#8c2630;border-color:#8c2630;color:#fff}
         .req-star{color:#c0392b}
+        .opt{font-weight:500;color:var(--mut);font-size:.85em}
 
         /* La colonne d'actions reste visible quand le tableau défile horizontalement */
         #etudiants table thead th:last-child,#etudiants table tbody td:last-child{position:sticky;right:0;z-index:2;background:#f7faff;
@@ -992,6 +993,28 @@
                 <footer class="dialog-foot">
                     <button class="admin-action ghost" type="button" data-close>Annuler</button>
                     <button class="admin-action" type="submit" id="student-submit">Créer l’étudiant</button>
+                </footer>
+            </form>
+        </dialog>
+
+        <dialog class="upb-dialog" id="reject-dialog" aria-labelledby="reject-dialog-title">
+            <form id="reject-form" autocomplete="off">
+                <header class="dialog-head">
+                    <h3 id="reject-dialog-title">Refuser la demande</h3>
+                    <button class="dialog-close" type="button" data-close aria-label="Fermer">×</button>
+                </header>
+                <div class="dialog-body">
+                    <p class="dialog-lead" id="reject-lead">Expliquez à l’étudiant pourquoi sa demande est refusée.</p>
+                    <div class="field full">
+                        <label for="reject-comment">Commentaire pour l’étudiant <span class="opt">(facultatif)</span></label>
+                        <textarea id="reject-comment" maxlength="500" rows="4" placeholder="Ex. Le nom saisi ne correspond pas à celui de votre carte d’étudiant. Merci de le corriger."></textarea>
+                        <small id="reject-count">0 / 500</small>
+                    </div>
+                    <p class="auth-error" id="reject-error" role="alert" hidden></p>
+                </div>
+                <footer class="dialog-foot">
+                    <button class="admin-action ghost" type="button" data-close>Annuler</button>
+                    <button class="admin-action reject" type="submit">Refuser la demande</button>
                 </footer>
             </form>
         </dialog>
@@ -2702,14 +2725,45 @@
             }
         }
 
+        // Fenêtre de refus : renvoie le commentaire saisi ('' si aucun) ou null si l'administrateur annule.
+        function demanderMotifRefus(lead) {
+            return new Promise(resolve => {
+                const dialog = $('reject-dialog'), form = $('reject-form'), field = $('reject-comment');
+                $('reject-lead').textContent = lead;
+                field.value = '';
+                $('reject-count').textContent = '0 / 500';
+                let fini = false;
+                const terminer = valeur => {
+                    if (fini) return;
+                    fini = true;
+                    form.removeEventListener('submit', soumettre);
+                    dialog.removeEventListener('close', annuler);
+                    field.removeEventListener('input', compter);
+                    if (dialog.open) dialog.close();
+                    resolve(valeur);
+                };
+                const soumettre = event => { event.preventDefault(); terminer(field.value.trim()); };
+                const annuler = () => terminer(null);
+                const compter = () => { $('reject-count').textContent = `${field.value.length} / 500`; };
+                form.addEventListener('submit', soumettre);
+                dialog.addEventListener('close', annuler);
+                field.addEventListener('input', compter);
+                dialog.showModal();
+                field.focus();
+            });
+        }
+
         async function traiterDemande(id, action) {
-            const label = action === 'approve' ? 'approuver' : 'refuser';
-            if (!confirm(`Voulez-vous ${label} cette demande ?`)) return;
+            let commentaire;
+            if (action === 'reject') {
+                commentaire = await demanderMotifRefus('Cette correction sera refusée et l’étudiant en sera informé par e-mail (s’il a une adresse). Le commentaire lui explique pourquoi.');
+                if (commentaire === null) return;
+            } else if (!confirm('Voulez-vous approuver cette demande ?')) return;
             try {
                 const response = await adminFetch('/api/admin_modifications', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, action })
+                    body: JSON.stringify({ id, action, ...(commentaire ? { commentaire } : {}) })
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Traitement impossible.');
@@ -2755,13 +2809,16 @@
         }
 
         async function traiterCreation(id, action) {
-            const label = action === 'approve' ? 'approuver et créer le dossier de' : 'refuser la demande de';
-            if (!confirm(`Voulez-vous ${label} ce candidat ?`)) return;
+            let commentaire;
+            if (action === 'reject') {
+                commentaire = await demanderMotifRefus('Cette demande d’ajout de dossier sera refusée et le candidat en sera informé par e-mail (s’il a une adresse). Le commentaire lui explique pourquoi.');
+                if (commentaire === null) return;
+            } else if (!confirm('Voulez-vous approuver et créer le dossier de ce candidat ?')) return;
             try {
                 const response = await adminFetch('/api/admin_creations', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, action })
+                    body: JSON.stringify({ id, action, ...(commentaire ? { commentaire } : {}) })
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Traitement impossible.');

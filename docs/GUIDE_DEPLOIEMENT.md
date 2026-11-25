@@ -108,6 +108,7 @@ Render et Netlify redéploient automatiquement à chaque `git push` sur la branc
 | `UPB_SECRET_KEY` | 64 caractères aléatoires | `python -c "import secrets; print(secrets.token_hex(32))"` ; la changer déconnecte tous les admins |
 | `UPB_DOCS_PASSWORD` | mot de passe long | Accès à `/docs`, à remettre aux intégrateurs |
 | `RESEND_API_KEY` | clé Resend (`re_…`) | E-mails aux étudiants à l'approbation/refus des demandes. Le domaine `synapstic.tech` doit être vérifié dans Resend (DNS SPF/DKIM) pour que `noreply@synapstic.tech` soit accepté comme expéditeur. Sans clé : aucun e-mail, tout le reste fonctionne |
+| `UPB_PORTAL_URL` | *(facultative)* | Page du portail ouverte par le bouton « Mettre à jour mes informations » des e-mails de refus ; par défaut la racine du site Netlify de `UPB_CORS_ORIGINS` |
 | `UPB_MAIL_LOGO_URL` | *(facultative)* | Logo de l'en-tête des e-mails ; par défaut `logo-upb.png` sur le site Netlify de `UPB_CORS_ORIGINS` |
 | `UPB_MAIL_FROM` | `noreply@synapstic.tech` | Facultative (c'est la valeur par défaut) : la seule adresse que l'étudiant voit |
 | `UPB_AUDIT_ENABLED` | `1` | Journal d'activité |

@@ -117,6 +117,7 @@ MIGRATION_PROBES: tuple[tuple[str, str, str | None, str | None], ...] = (
     ("07_journal_activite.sql", "journal_activite", None, None),
     ("08_integrations.sql", "partenaire_cle", None, None),
     ("09_matricule_facultatif.sql", "etudiant", "matricule", "nullable"),
+    ("10_commentaire_refus.sql", "etudiant_modification", "commentaire", None),
 )
 
 

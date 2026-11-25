@@ -60,13 +60,24 @@ BODIES = {
 }
 
 
+def _site_origin() -> str:
+    """Premier site autorisé de UPB_CORS_ORIGINS (le site Netlify) ; vide si inconnu."""
+    return next((o.strip().rstrip("/") for o in os.getenv("UPB_CORS_ORIGINS", "").split(",") if o.strip()), "")
+
+
+def portal_url() -> str | None:
+    """Page où l'étudiant met à jour ses informations : `UPB_PORTAL_URL`, sinon la racine du premier site autorisé."""
+    url = os.getenv("UPB_PORTAL_URL", "").strip() or _site_origin()
+    return url if url.startswith("https://") else None
+
+
 def logo_url() -> str | None:
     """Adresse publique du logo (les clients de messagerie n'affichent que des images hébergées en https).
 
     `UPB_MAIL_LOGO_URL`, sinon `logo-upb.png` sur le premier site autorisé de `UPB_CORS_ORIGINS` (le site Netlify)."""
     url = os.getenv("UPB_MAIL_LOGO_URL", "").strip()
     if not url:
-        origin = next((o.strip().rstrip("/") for o in os.getenv("UPB_CORS_ORIGINS", "").split(",") if o.strip()), "")
+        origin = _site_origin()
         url = f"{origin}/logo-upb.png" if origin else ""
     return url if url.startswith("https://") else None
 
@@ -84,14 +95,21 @@ HEADLINES = {
 }
 
 
-def compose(kind: str, approved: bool, nom: str, prenoms: str, matricule: str | None) -> tuple[str, str, str]:
+def compose(
+    kind: str, approved: bool, nom: str, prenoms: str, matricule: str | None, comment: str | None = None
+) -> tuple[str, str, str]:
     subject = SUBJECTS[(kind, approved)]
     headline = HEADLINES[(kind, approved)]
     name = f"{prenoms} {nom}".strip()
     greeting = f"Bonjour {name}," if name else "Bonjour,"
     body = BODIES[(kind, approved)]
+    comment = (comment or "").strip() if not approved else ""
+    link = portal_url() if not approved else None
     text = "\n".join(
-        [greeting, "", body] + ([f"Matricule : {matricule}"] if matricule else [])
+        [greeting, "", body]
+        + ([f"Motif du refus : {comment}"] if comment else [])
+        + ([f"Mettre à jour mes informations : {link}"] if link else [])
+        + ([f"Matricule : {matricule}"] if matricule else [])
         + ["", "INCUBATEUR UPB", "Ceci est un message automatique : merci de ne pas y répondre."]
     )
 
@@ -110,6 +128,22 @@ def compose(kind: str, approved: bool, nom: str, prenoms: str, matricule: str | 
         f'color:#5b6a96">Matricule</div><div style="font:700 18px Arial,Helvetica,sans-serif;letter-spacing:1px;'
         f'color:{NAVY};padding-top:4px">{e(matricule)}</div></td></tr></table>'
         if matricule else ""
+    )
+    comment_block = (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0 0;'
+        f'background:#fff7ec;border-left:4px solid {GOLD};border-radius:8px"><tr><td style="padding:14px 18px">'
+        f'<div style="font:700 11px Arial,Helvetica,sans-serif;letter-spacing:1.4px;text-transform:uppercase;'
+        f'color:#9a3412">Motif du refus</div><div style="font:400 15px/1.6 Arial,Helvetica,sans-serif;color:{NAVY};'
+        f'padding-top:6px">{e(comment).replace(chr(10), "<br>")}</div></td></tr></table>'
+        if comment else ""
+    )
+    button = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px 0 0"><tr>'
+        f'<td align="center" bgcolor="{GOLD}" style="background:{GOLD};border-radius:999px">'
+        f'<a href="{e(link, quote=True)}" target="_blank" style="display:inline-block;padding:14px 28px;'
+        f'font:800 15px Arial,Helvetica,sans-serif;color:{NAVY};text-decoration:none;border-radius:999px">'
+        f'Mettre à jour mes informations</a></td></tr></table>'
+        if link else ""
     )
     body_html = f"""<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -133,7 +167,9 @@ def compose(kind: str, approved: bool, nom: str, prenoms: str, matricule: str | 
   <tr><td style="padding:14px 32px 34px;font:400 15px/1.65 Arial,Helvetica,sans-serif;color:#2b3560">
    <p style="margin:0 0 12px;font-weight:700;color:{NAVY}">{e(greeting)}</p>
    <p style="margin:0">{e(body)}</p>
+   {comment_block}
    {matricule_row}
+   {button}
   </td></tr>
   <tr><td bgcolor="{PAPER}" style="background:{PAPER};padding:20px 32px;border-top:1px solid #dbe5fa">
    <div style="font:800 12px Arial,Helvetica,sans-serif;letter-spacing:2.4px;color:{NAVY}">INCUBATEUR UPB</div>
@@ -193,7 +229,8 @@ def notify(notice: dict | None, wait: bool = False) -> tuple[str, str | None]:
     if not enabled():
         return "non_configure", None
     subject, text, body_html = compose(
-        notice["kind"], notice["approved"], notice.get("nom", ""), notice.get("prenoms", ""), notice.get("matricule")
+        notice["kind"], notice["approved"], notice.get("nom", ""), notice.get("prenoms", ""), notice.get("matricule"),
+        notice.get("comment"),
     )
     if wait:
         ok, reason = deliver(to, subject, text, body_html)

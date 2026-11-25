@@ -74,6 +74,7 @@ Netlify (frontend) + Render (backend) + Neon + UptimeRobot, sans fichier de conf
 | `RESEND_API_KEY` | Clé d'API Resend pour les e-mails de décision aux étudiants (vide = aucun e-mail envoyé) |
 | `UPB_MAIL_FROM` | Expéditeur des e-mails, seule adresse visible par l'étudiant (défaut `noreply@synapstic.tech`) |
 | `UPB_MAIL_NAME` | Nom affiché de l'expéditeur (défaut `INCUBATEUR UPB`) |
+| `UPB_PORTAL_URL` | Page ouverte par le bouton « Mettre à jour mes informations » des e-mails de refus (https). Vide = racine du premier site de `UPB_CORS_ORIGINS` |
 | `UPB_MAIL_LOGO_URL` | Logo de l'en-tête des e-mails (https). Vide = `logo-upb.png` du premier site de `UPB_CORS_ORIGINS` |
 | `UPB_MAIL_ENABLED` | `0` coupe les envois sans retirer la clé |
 | `UPB_DOCS_PASSWORD` | Mot de passe d'accès à `/docs`, `/redoc`, `/openapi.json` (10 caractères min.), à remettre aux intégrateurs autorisés |

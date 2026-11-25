@@ -256,3 +256,68 @@ def test_html_message_design_logo_and_safety(monkeypatch):
     # Refus : autre badge ; sans matricule : pas de bloc matricule
     refused = mailer.compose("correction", False, "K", "A", None)[2]
     assert "Non retenu" in refused and "Matricule" not in refused
+
+
+# ------------------------------------------------------------------ commentaire de refus et bouton de mise à jour
+def test_refusal_mail_shows_the_comment_and_the_update_button(monkeypatch):
+    monkeypatch.delenv("UPB_PORTAL_URL", raising=False)
+    monkeypatch.setenv("UPB_CORS_ORIGINS", "https://concours.exemple.ci/")
+    subject, text, page = mailer.compose("creation", False, "Konan", "Aline", None, "Nom illisible.\nMerci de <corriger> & renvoyer.")
+    assert "Motif du refus" in page and "Nom illisible.<br>Merci de &lt;corriger&gt; &amp; renvoyer." in page
+    assert 'href="https://concours.exemple.ci"' in page and "Mettre à jour mes informations" in page
+    assert "Motif du refus : Nom illisible." in text and "Mettre à jour mes informations : https://concours.exemple.ci" in text
+    # Sans commentaire : bouton seul ; adresse explicite prioritaire ; http refusé -> pas de bouton
+    page = mailer.compose("correction", False, "K", "A", None)[2]
+    assert "Motif du refus" not in page and "Mettre à jour mes informations" in page
+    monkeypatch.setenv("UPB_PORTAL_URL", "https://portail.exemple.ci/etudiant")
+    assert 'href="https://portail.exemple.ci/etudiant"' in mailer.compose("correction", False, "K", "A", None)[2]
+    monkeypatch.setenv("UPB_PORTAL_URL", "http://non-securise.ci")
+    assert "Mettre à jour mes informations" not in mailer.compose("correction", False, "K", "A", None)[2]
+    monkeypatch.delenv("UPB_PORTAL_URL")
+    monkeypatch.delenv("UPB_CORS_ORIGINS")
+    assert "Mettre à jour mes informations" not in mailer.compose("correction", False, "K", "A", None)[2]  # URL inconnue
+    # L'approbation n'a ni bouton ni motif, même si un commentaire est fourni
+    monkeypatch.setenv("UPB_CORS_ORIGINS", "https://concours.exemple.ci")
+    approved = mailer.compose("creation", True, "K", "A", "ZZTA1703980001", "ne doit pas apparaître")[2]
+    assert "Motif du refus" not in approved and "ne doit pas" not in approved and "Mettre à jour" not in approved
+
+
+def test_admin_comment_is_stored_mailed_and_validated_on_creation_refusal(client, resend, monkeypatch):
+    monkeypatch.setenv("UPB_CORS_ORIGINS", "https://concours.exemple.ci")
+    pending = submit_creation(client, nom="Zztmotif", prenoms="Luc", email="luc@exemple.ci")
+    url = "/api/admin_creations"
+    for bad in ("x" * 501, 123, ["a"]):
+        response = client.post(url, json={"id": pending["id"], "action": "reject", "commentaire": bad})
+        assert response.status_code == 422, bad
+    assert [r for r in client.get(url).json()["data"] if r["id"] == pending["id"]]  # toujours en attente
+    response = client.post(url, json={"id": pending["id"], "action": "reject", "commentaire": "  Matricule\x00 illisible,   merci de le vérifier.  "})
+    assert response.status_code == 200 and response.json()["mail"] == "envoye"
+    mail = resend[-1]["json"]
+    assert "Matricule illisible, merci de le vérifier." in mail["text"] and "Mettre à jour mes informations" in mail["html"]
+    import psycopg
+    from app import config
+    with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
+        stored = conn.execute("SELECT commentaire FROM etudiant_creation_demande WHERE id = %s", (pending["id"],)).fetchone()[0]
+    assert stored == "Matricule illisible, merci de le vérifier."
+
+
+def test_correction_refusal_comment_and_approval_ignores_it(client, resend, monkeypatch):
+    monkeypatch.setenv("UPB_CORS_ORIGINS", "https://concours.exemple.ci")
+    assert import_csv(client).status_code == 201
+    url = "/api/admin_modifications"
+    pending = lambda: [r for r in client.get(url).json()["data"] if r["matricule"] == "ZZTA1703980001"][0]  # noqa: E731
+    assert client.post("/api/demander_modification", json={"matricule": "ZZTA1703980001", "email": "a@exemple.ci"}).status_code == 201
+    assert client.post(url, json={"id": pending()["id"], "action": "reject", "commentaire": "y" * 501}).status_code == 422
+    data = client.post(url, json={"id": pending()["id"], "action": "reject", "commentaire": "Adresse e-mail non valide."}).json()
+    assert data["mail"] == "envoye" and "Adresse e-mail non valide." in resend[-1]["json"]["text"]
+    # Approbation : le commentaire est ignoré (jamais envoyé)
+    assert client.post("/api/demander_modification", json={"matricule": "ZZTA1703980001", "email": "b@exemple.ci"}).status_code == 201
+    data = client.post(url, json={"id": pending()["id"], "action": "approve", "commentaire": "secret"}).json()
+    assert data["mail"] == "envoye" and "secret" not in resend[-1]["json"]["text"] + resend[-1]["json"]["html"]
+
+
+def test_admin_page_asks_for_a_refusal_comment():
+    from pathlib import Path
+    page = (Path(__file__).resolve().parents[2] / "frontend" / "admin.html").read_text(encoding="utf-8")
+    assert 'id="reject-dialog"' in page and 'id="reject-comment" maxlength="500"' in page
+    assert page.count("demanderMotifRefus(") >= 3 and "...(commentaire ? { commentaire } : {})" in page

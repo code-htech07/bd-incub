@@ -2209,7 +2209,7 @@
           "Administration"
         ],
         "summary": "Approuver ou refuser une demande de correction",
-        "description": "`approve` applique les changements (et recalcule le matricule si le nom, les prénoms ou la date de naissance changent) ; `reject` la refuse.",
+        "description": "`approve` applique les changements ; `reject` la refuse. Un `commentaire` facultatif (500 caractères) explique le refus : il est joint à l'e-mail envoyé à l'étudiant.",
         "operationId": "process_modification_api_admin_modifications_post",
         "requestBody": {
           "description": "Demande et décision.",
@@ -2230,6 +2230,22 @@
                       "reject"
                     ],
                     "title": "Action"
+                  },
+                  "commentaire": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Commentaire",
+                    "description": "Motif du refus (facultatif, `reject` uniquement) : envoyé à l'étudiant dans l'e-mail de refus.",
+                    "examples": [
+                      "Votre nom ne correspond pas à celui de votre carte d'étudiant."
+                    ]
                   }
                 },
                 "type": "object",
@@ -2476,7 +2492,7 @@
           "Administration"
         ],
         "summary": "Approuver ou refuser une demande d'ajout de dossier",
-        "description": "`approve` crée l'étudiant avec le matricule saisi par le candidat (contrôlé : format et unicité) ; `reject` refuse la demande.",
+        "description": "`approve` crée l'étudiant avec le matricule saisi par le candidat (contrôlé : format et unicité) ou complète le dossier existant portant ce nom ; `reject` refuse la demande. Un `commentaire` facultatif (500 caractères) explique le refus : il est joint à l'e-mail envoyé à l'étudiant.",
         "operationId": "process_creation_api_admin_creations_post",
         "requestBody": {
           "description": "Demande et décision.",
@@ -2497,6 +2513,22 @@
                       "reject"
                     ],
                     "title": "Action"
+                  },
+                  "commentaire": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Commentaire",
+                    "description": "Motif du refus (facultatif, `reject` uniquement) : envoyé à l'étudiant dans l'e-mail de refus.",
+                    "examples": [
+                      "Votre nom ne correspond pas à celui de votre carte d'étudiant."
+                    ]
                   }
                 },
                 "type": "object",

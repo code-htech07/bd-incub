@@ -246,6 +246,22 @@ def _name_check(request: dict) -> dict | None:
     return {"score": score, "niveau": name_level(score)}
 
 
+COMMENT_MAX = 500
+
+
+def _refusal_comment(data: dict) -> str | None:
+    """Motif de refus saisi par l'administrateur (facultatif, 500 caractères au plus, texte brut)."""
+    value = data.get("commentaire")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ApiError(422, "Le commentaire doit être un texte.")
+    cleaned = re.sub(r"[^\S\n]+", " ", re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", value)).strip()
+    if len(cleaned) > COMMENT_MAX:
+        raise ApiError(422, f"Le commentaire est trop long ({COMMENT_MAX} caractères au maximum).")
+    return cleaned or None
+
+
 def _send_notice(result: dict, wait: bool = True) -> str:
     """Envoie l'e-mail de décision (après l'enregistrement) ; `result` reçoit `mail` (+ `mail_erreur` en cas d'échec)."""
     state, error = mailer.notify(result.pop("notice", None), wait=wait)
@@ -255,8 +271,8 @@ def _send_notice(result: dict, wait: bool = True) -> str:
     return state
 
 
-def _decide_modification(db: Database, request_id: int, action: str) -> dict:
-    """Approuve ou refuse une demande de correction (transaction propre)."""
+def _decide_modification(db: Database, request_id: int, action: str, comment: str | None = None) -> dict:
+    """Approuve ou refuse une demande de correction (transaction propre). `comment` : motif du refus."""
     try:
         with db.transaction():
             with db.cursor() as cursor:
@@ -277,10 +293,10 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
                     cursor.execute(
                         """
                         UPDATE etudiant_modification
-                        SET statut = 'REFUSEE', reviewed_at = NOW()
+                        SET statut = 'REFUSEE', reviewed_at = NOW(), commentaire = %s
                         WHERE id = %s
                         """,
-                        (request_id,),
+                        (comment, request_id),
                     )
                     cursor.execute(
                         "SELECT matricule, nom, prenoms, email FROM etudiant WHERE id = %s",
@@ -291,7 +307,8 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
                     return {
                         "message": "Demande refusée.",
                         "notice": {
-                            "kind": "correction", "approved": False, "to": known.get("email") or proposed.get("email"),
+                            "kind": "correction", "approved": False, "comment": comment,
+                            "to": known.get("email") or proposed.get("email"),
                             "nom": known.get("nom", ""), "prenoms": known.get("prenoms", ""),
                             "matricule": known.get("matricule"),
                         },
@@ -383,8 +400,8 @@ def _decide_modification(db: Database, request_id: int, action: str) -> dict:
     "/api/admin_modifications",
     tags=["Administration"],
     summary="Approuver ou refuser une demande de correction",
-    description="`approve` applique les changements (et recalcule le matricule si le nom, "
-    "les prénoms ou la date de naissance changent) ; `reject` la refuse.",
+    description="`approve` applique les changements ; `reject` la refuse. Un `commentaire` facultatif "
+    "(500 caractères) explique le refus : il est joint à l'e-mail envoyé à l'étudiant.",
     response_model=None,
     responses={
         200: {"model": d.ModificationDecisionResponse},
@@ -402,9 +419,13 @@ def process_modification(body: Any = Depends(json_body), db: Database = Depends(
         action="DEMANDE_CORRECTION_APPROUVEE" if action == "approve" else "DEMANDE_CORRECTION_REFUSEE",
         target_type="demande_correction", target=str(request_id),
     )
-    result = _decide_modification(db, request_id, action)
+    comment = _refusal_comment(data) if action == "reject" else None
+    result = _decide_modification(db, request_id, action, comment)
     _send_notice(result)
-    audit.annotate(matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"))
+    audit.annotate(
+        matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"),
+        commentaire_longueur=len(comment) if comment else None,
+    )
     return respond(200, {"status": "success", **result})
 
 
@@ -683,8 +704,8 @@ def _creation_match(known: list[dict], fields) -> dict | None:
     }
 
 
-def _decide_creation(db: Database, request_id: int, action: str) -> dict:
-    """Approuve (crée l'étudiant) ou refuse une demande d'ajout de dossier."""
+def _decide_creation(db: Database, request_id: int, action: str, comment: str | None = None) -> dict:
+    """Approuve (crée l'étudiant) ou refuse une demande d'ajout de dossier. `comment` : motif du refus."""
     try:
         with db.transaction():
             with db.cursor() as cursor:
@@ -704,16 +725,16 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
                     cursor.execute(
                         """
                         UPDATE etudiant_creation_demande
-                        SET statut = 'REFUSEE', reviewed_at = NOW()
+                        SET statut = 'REFUSEE', reviewed_at = NOW(), commentaire = %s
                         WHERE id = %s
                         """,
-                        (request_id,),
+                        (comment, request_id),
                     )
                     refused = demande["donnees"] if isinstance(demande["donnees"], dict) else {}
                     return {
                         "message": "Demande refusée.",
                         "notice": {
-                            "kind": "creation", "approved": False, "to": refused.get("email"),
+                            "kind": "creation", "approved": False, "comment": comment, "to": refused.get("email"),
                             "nom": refused.get("nom", ""), "prenoms": refused.get("prenoms", ""),
                             "matricule": demande["matricule_saisi"],
                         },
@@ -814,7 +835,8 @@ def _decide_creation(db: Database, request_id: int, action: str) -> dict:
     tags=["Administration"],
     summary="Approuver ou refuser une demande d'ajout de dossier",
     description="`approve` crée l'étudiant avec le matricule saisi par le candidat (contrôlé : format "
-    "et unicité) ; `reject` refuse la demande.",
+    "et unicité) ou complète le dossier existant portant ce nom ; `reject` refuse la demande. Un `commentaire` "
+    "facultatif (500 caractères) explique le refus : il est joint à l'e-mail envoyé à l'étudiant.",
     response_model=None,
     responses={
         200: {"model": d.CreationDecisionResponse},
@@ -832,11 +854,12 @@ def process_creation(body: Any = Depends(json_body), db: Database = Depends(get_
         action="DEMANDE_CREATION_APPROUVEE" if action == "approve" else "DEMANDE_CREATION_REFUSEE",
         target_type="demande_creation", target=str(request_id),
     )
-    result = _decide_creation(db, request_id, action)
+    comment = _refusal_comment(data) if action == "reject" else None
+    result = _decide_creation(db, request_id, action, comment)
     _send_notice(result)
     audit.annotate(
         matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"),
-        fusion=result.get("fusion"),
+        fusion=result.get("fusion"), commentaire_longueur=len(comment) if comment else None,
     )
     return respond(200, {"status": "success", **result})
 

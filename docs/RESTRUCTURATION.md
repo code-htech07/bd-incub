@@ -522,3 +522,20 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   le domaine `synapstic.tech` (SPF/DKIM) et ajouter `RESEND_API_KEY` sur Render.
 - Tests : `tests/test_mail_and_names.py` (ressemblance, fusion, homonymes, e-mails simulés, confidentialité de
   l'expéditeur, panne Resend) et suppression dans `tests/test_admin_students.py`. Les tests n'envoient jamais d'e-mail réel.
+
+## Étape 21 — Commentaire de refus et bouton de mise à jour dans l'e-mail de refus
+
+- **Commentaire** : en refusant une demande (correction ou ajout de dossier), l'administrateur ouvre une fenêtre « Refuser la
+  demande » avec un champ **Commentaire pour l'étudiant** (facultatif, 500 caractères, compteur). Annuler n'envoie rien.
+  API : champ `commentaire` de `POST /api/admin_modifications` et `/api/admin_creations` (lu seulement pour `reject` ; ignoré à
+  l'approbation) ; texte uniquement, espaces et caractères de contrôle nettoyés, `422` si plus de 500 caractères ou non texte.
+  Il est conservé avec la demande (colonne `commentaire`) et joint à l'e-mail de refus (bloc « Motif du refus »). Le journal
+  n'enregistre que sa longueur (`commentaire_longueur`), jamais son contenu.
+- **Bouton dans l'e-mail de refus** : « Mettre à jour mes informations », vers `UPB_PORTAL_URL`, sinon la racine du premier site
+  de `UPB_CORS_ORIGINS` (https uniquement ; sans adresse connue, pas de bouton). Le lien ne contient aucune donnée personnelle.
+  La version texte de l'e-mail reprend le motif et le lien. L'e-mail d'approbation n'a ni bouton ni motif.
+- **Migration 10** (`10_commentaire_refus.sql`) : colonne `commentaire` sur `etudiant_modification` et
+  `etudiant_creation_demande` (idempotente ; détectée par la sonde de schéma). **À appliquer sur la base de production**
+  (`python -m scripts.migrate`) avant de déployer le code, sinon `/api/sante?base=1` signale la migration manquante.
+- Tests : `tests/test_mail_and_names.py` (mise en forme, motif, bouton, validation, stockage, approbation sans motif) et
+  `tests/test_api_basic.py` (sonde de schéma).

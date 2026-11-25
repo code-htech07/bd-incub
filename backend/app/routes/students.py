@@ -93,6 +93,23 @@ def verify_student(body: Any = Depends(json_body), db: Database = Depends(get_db
     )
 
 
+DECISION_DELAY_HOURS = 12
+
+
+def _follow_up(has_email: bool) -> tuple[str, dict]:
+    """Phrase ajoutée à l'accusé de réception d'une demande, et indicateurs pour les clients de l'API."""
+    if has_email:
+        return (
+            f" Vous serez informé(e) de la décision par e-mail dans un délai de {DECISION_DELAY_HOURS} heures.",
+            {"notifie_par_email": True, "delai_heures": DECISION_DELAY_HOURS},
+        )
+    return (
+        " Aucune adresse e-mail n'est renseignée : vous ne serez pas prévenu(e) de la décision. "
+        "Revenez vérifier votre matricule pour la connaître.",
+        {"notifie_par_email": False, "delai_heures": DECISION_DELAY_HOURS},
+    )
+
+
 def _validated_fields(data: dict, check_reference: bool = True) -> dict[str, Any]:
     """Valide et nettoie les champs de dossier présents dans `data`.
 
@@ -158,7 +175,7 @@ def _validated_fields(data: dict, check_reference: bool = True) -> dict[str, Any
     "Une seule demande en attente par dossier.",
     response_model=None,
     responses={
-        201: {"model": d.SuccessResponse, "description": "Demande transmise."},
+        201: {"model": d.RequestReceivedResponse, "description": "Demande transmise."},
         **d.errors(400, 404, 409, 422, 500),
     },
     openapi_extra=d.request_body(d.ModificationBody, "Matricule et champs à corriger."),
@@ -220,17 +237,20 @@ def request_modification(
                     """,
                     (student["id"], json.dumps(different, ensure_ascii=False)),
                 )
+                email = different["email"] if "email" in different else student["email"]
     except psycopg.errors.UniqueViolation:
         raise ApiError(409, "Une demande est déjà en attente pour ce dossier.")
     except psycopg.Error:
         logger.exception("Demande de modification UPB")
         raise ApiError(500, "Erreur lors de l’enregistrement de la demande.")
+    sentence, follow_up = _follow_up(bool(email))
     return respond(
         201,
         {
             "status": "success",
             "message": "Votre demande a été transmise. Les changements seront "
-            "appliqués après validation par un administrateur.",
+            "appliqués après validation par un administrateur." + sentence,
+            **follow_up,
         },
     )
 
@@ -247,7 +267,7 @@ def request_modification(
     "les lettres de l'alphabet français, espaces, tirets et apostrophes.",
     response_model=None,
     responses={
-        201: {"model": d.SuccessResponse, "description": "Demande transmise."},
+        201: {"model": d.RequestReceivedResponse, "description": "Demande transmise."},
         **d.errors(400, 409, 422, 500),
     },
     openapi_extra=d.request_body(d.CreationBody, "Matricule saisi et informations du candidat."),
@@ -287,12 +307,14 @@ def request_creation(body: Any = Depends(json_body), db: Database = Depends(get_
     except psycopg.Error:
         logger.exception("Demande de création de dossier UPB")
         raise ApiError(500, "Erreur lors de l’enregistrement de la demande.")
+    sentence, follow_up = _follow_up(bool(fields.get("email")))
     return respond(
         201,
         {
             "status": "success",
             "message": "Votre dossier a été transmis. Il sera créé après validation "
-            "par un administrateur : revenez vérifier votre matricule ensuite.",
+            "par un administrateur : revenez vérifier votre matricule ensuite." + sentence,
+            **follow_up,
         },
     )
 

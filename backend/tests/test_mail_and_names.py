@@ -321,3 +321,102 @@ def test_admin_page_asks_for_a_refusal_comment():
     page = (Path(__file__).resolve().parents[2] / "frontend" / "admin.html").read_text(encoding="utf-8")
     assert 'id="reject-dialog"' in page and 'id="reject-comment" maxlength="500"' in page
     assert page.count("demanderMotifRefus(") >= 3 and "...(commentaire ? { commentaire } : {})" in page
+
+
+def test_local_addresses_are_accepted_and_missing_portal_url_is_warned(monkeypatch, caplog):
+    monkeypatch.delenv("UPB_CORS_ORIGINS", raising=False)
+    for url in ("http://localhost:8000", "http://127.0.0.1:5500/"):
+        monkeypatch.setenv("UPB_PORTAL_URL", url)
+        assert mailer.portal_url() == url
+        assert f'href="{url}"' in mailer.compose("creation", False, "K", "A", None)[2]
+    for url in ("http://localhost.evil.ci", "http://exemple.ci", "javascript:alert(1)"):
+        monkeypatch.setenv("UPB_PORTAL_URL", url)
+        assert mailer.portal_url() is None
+    # Avertissement au démarrage quand le bouton ou le logo manquera
+    monkeypatch.delenv("UPB_PORTAL_URL")
+    monkeypatch.delenv("UPB_MAIL_LOGO_URL", raising=False)
+    monkeypatch.setenv("RESEND_API_KEY", "k")
+    with caplog.at_level("WARNING", logger="upb.mail"):
+        mailer.warn_if_incomplete()
+    assert "UPB_PORTAL_URL" in caplog.text and "UPB_MAIL_LOGO_URL" in caplog.text
+    caplog.clear()
+    monkeypatch.setenv("UPB_PORTAL_URL", "https://portail.exemple.ci")
+    monkeypatch.setenv("UPB_MAIL_LOGO_URL", "https://portail.exemple.ci/logo-upb.png")
+    with caplog.at_level("WARNING", logger="upb.mail"):
+        mailer.warn_if_incomplete()
+    assert caplog.text == ""
+
+
+# ------------------------------------------------------------------ accusé de réception : délai de 12 h
+def test_submission_tells_the_student_about_the_email_and_the_12h_delay(client):
+    import psycopg
+    from app import config
+    # Ajout de dossier : avec adresse
+    ok = client.post("/api/demander_creation", json={"matricule": "ZZTM0506000005", "nom": "Zztavis", "prenoms": "Eve", "email": "eve@exemple.ci"})
+    body = ok.json()
+    assert ok.status_code == 201 and body["notifie_par_email"] is True and body["delai_heures"] == 12
+    assert "par e-mail dans un délai de 12 heures" in body["message"]
+    # Ajout de dossier : sans adresse
+    no_mail = client.post("/api/demander_creation", json={"matricule": "ZZTN0506000006", "nom": "Zztavis", "prenoms": "Paul"}).json()
+    assert no_mail["notifie_par_email"] is False and "Aucune adresse e-mail" in no_mail["message"] and "12 heures" not in no_mail["message"]
+    # Correction : le dossier n'a pas d'adresse et la demande n'en propose pas -> non notifié
+    assert import_csv(client).status_code == 201
+    with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
+        conn.execute("UPDATE etudiant SET email = NULL WHERE matricule IN ('ZZTA1703980001', 'ZZTB0205990001')")
+        conn.commit()
+    first = client.post("/api/demander_modification", json={"matricule": "ZZTA1703980001", "telephone": "0555555555"}).json()
+    assert first["notifie_par_email"] is False
+    # Correction qui ajoute une adresse -> notifié
+    second = client.post("/api/demander_modification", json={"matricule": "ZZTB0205990001", "email": "bob@exemple.ci"}).json()
+    assert second["notifie_par_email"] is True and "12 heures" in second["message"]
+    # Correction d'un dossier qui a déjà une adresse -> notifié sans la renvoyer
+    with psycopg.connect(config.database_url(), prepare_threshold=None) as conn:
+        conn.execute("UPDATE etudiant SET email = 'deja@exemple.ci' WHERE matricule = 'ZZTA1703980001'")
+        conn.commit()
+    pending = [r for r in client.get("/api/admin_modifications").json()["data"] if r["matricule"] == "ZZTA1703980001"][0]
+    assert client.post("/api/admin_modifications", json={"id": pending["id"], "action": "reject"}).status_code == 200
+    third = client.post("/api/demander_modification", json={"matricule": "ZZTA1703980001", "telephone": "0909090909"}).json()
+    assert third["notifie_par_email"] is True
+
+
+def test_portal_page_announces_the_delay():
+    from pathlib import Path
+    page = (Path(__file__).resolve().parents[2] / "frontend" / "index.html").read_text(encoding="utf-8")
+    assert "data.notifie_par_email" in page and "data.delai_heures" in page and "Renseignez-la pour être informé(e)" in page
+
+
+# ------------------------------------------------------------------ lien du bouton déduit du site de l'administrateur
+def test_button_link_falls_back_to_the_admin_site_origin(monkeypatch):
+    for name in ("UPB_PORTAL_URL", "UPB_CORS_ORIGINS"):
+        monkeypatch.delenv(name, raising=False)
+    assert mailer.portal_url() is None  # rien de connu
+    assert mailer.portal_url("https://concours.exemple.ci/") == "https://concours.exemple.ci"
+    assert mailer.portal_url("http://localhost:8000") == "http://localhost:8000"
+    assert mailer.portal_url("http://evil.ci") is None and mailer.portal_url("javascript:alert(1)") is None
+    page = mailer.compose("creation", False, "K", "A", None, None, "https://concours.exemple.ci")[2]
+    assert 'href="https://concours.exemple.ci"' in page and "Mettre à jour mes informations" in page
+    # Avec des sites autorisés : l'origine doit en faire partie, sinon repli sur le premier site autorisé
+    monkeypatch.setenv("UPB_CORS_ORIGINS", "https://a.exemple.ci,https://b.exemple.ci")
+    assert mailer.portal_url("https://b.exemple.ci") == "https://b.exemple.ci"
+    assert mailer.portal_url("https://pirate.ci") == "https://a.exemple.ci"
+    # L'adresse explicite reste prioritaire
+    monkeypatch.setenv("UPB_PORTAL_URL", "https://portail.exemple.ci")
+    assert mailer.portal_url("https://b.exemple.ci") == "https://portail.exemple.ci"
+
+
+def test_refusal_mail_gets_the_link_from_the_admin_request_headers(client, resend, monkeypatch):
+    for name in ("UPB_PORTAL_URL", "UPB_CORS_ORIGINS"):
+        monkeypatch.delenv(name, raising=False)
+    url = "/api/admin_creations"
+
+    def refuse(headers):
+        pending = submit_creation(client, nom="Zztlien", prenoms="Eva", email="eva@exemple.ci")
+        assert client.post(url, json={"id": pending["id"], "action": "reject"}, headers=headers).status_code == 200
+        return resend[-1]["json"]
+
+    mail = refuse({"Origin": "https://concours.exemple.ci"})
+    assert 'href="https://concours.exemple.ci"' in mail["html"] and "https://concours.exemple.ci" in mail["text"]
+    mail = refuse({"Referer": "https://autre.exemple.ci/admin.html?x=1"})  # sans Origin : le site du Referer
+    assert 'href="https://autre.exemple.ci"' in mail["html"]
+    mail = refuse({"Origin": "http://evil.ci"})  # origine inutilisable : pas de bouton
+    assert "Mettre à jour mes informations" not in mail["html"]

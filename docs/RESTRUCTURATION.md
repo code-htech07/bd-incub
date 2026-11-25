@@ -532,10 +532,29 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   Il est conservé avec la demande (colonne `commentaire`) et joint à l'e-mail de refus (bloc « Motif du refus »). Le journal
   n'enregistre que sa longueur (`commentaire_longueur`), jamais son contenu.
 - **Bouton dans l'e-mail de refus** : « Mettre à jour mes informations », vers `UPB_PORTAL_URL`, sinon la racine du premier site
-  de `UPB_CORS_ORIGINS` (https uniquement ; sans adresse connue, pas de bouton). Le lien ne contient aucune donnée personnelle.
+  de `UPB_CORS_ORIGINS` (https ; `http://localhost` et `127.0.0.1` tolérés pour les essais locaux). **Lien de repli sans
+  configuration** : le site d'où l'administrateur refuse la demande (en-tête `Origin`, sinon `Referer`), puisque les pages
+  d'administration et du portail sont servies par le même site ; accepté s'il est en https (ou `localhost`) et, quand
+  `UPB_CORS_ORIGINS` est défini, s'il en fait partie. Ordre : `UPB_PORTAL_URL`, origine de l'administrateur, premier site de
+  `UPB_CORS_ORIGINS`. Le bouton n'est omis que si aucune de ces adresses n'est utilisable (avertissement dans les logs).
+  Définir `UPB_PORTAL_URL` reste recommandé en production. Le lien ne contient aucune donnée personnelle.
   La version texte de l'e-mail reprend le motif et le lien. L'e-mail d'approbation n'a ni bouton ni motif.
 - **Migration 10** (`10_commentaire_refus.sql`) : colonne `commentaire` sur `etudiant_modification` et
   `etudiant_creation_demande` (idempotente ; détectée par la sonde de schéma). **À appliquer sur la base de production**
   (`python -m scripts.migrate`) avant de déployer le code, sinon `/api/sante?base=1` signale la migration manquante.
 - Tests : `tests/test_mail_and_names.py` (mise en forme, motif, bouton, validation, stockage, approbation sans motif) et
   `tests/test_api_basic.py` (sonde de schéma).
+
+## Étape 22 — Accusé de réception : l'étudiant est informé du délai de 12 heures
+
+- Après `POST /api/demander_modification` et `/api/demander_creation`, la réponse `201` complète le message :
+  - adresse e-mail connue (celle de la demande, ou pour une correction celle déjà au dossier) : « Vous serez informé(e) de la
+    décision par e-mail dans un délai de 12 heures. » ;
+  - aucune adresse : « Aucune adresse e-mail n'est renseignée : vous ne serez pas prévenu(e) de la décision. Revenez vérifier
+    votre matricule pour la connaître. » (le délai n'est alors pas promis).
+- Nouveaux champs de réponse : `notifie_par_email` (booléen) et `delai_heures` (12, constante `DECISION_DELAY_HOURS` dans
+  `routes/students.py`). Le portail affiche ce message dans l'encadré de confirmation et dans la bulle de Gé ; une indication
+  sous le champ « Adresse e-mail » invite à la renseigner.
+- Le délai est un engagement affiché à l'étudiant : il suppose que les demandes soient traitées dans les 12 h. Aucun changement
+  de schéma.
+- Tests : `tests/test_mail_and_names.py`.

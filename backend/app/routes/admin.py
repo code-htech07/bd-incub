@@ -8,7 +8,7 @@ from math import ceil
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
 from .. import config
 from .. import audit, mailer
@@ -262,9 +262,22 @@ def _refusal_comment(data: dict) -> str | None:
     return cleaned or None
 
 
-def _send_notice(result: dict, wait: bool = True) -> str:
+def _request_origin(request: Request) -> str | None:
+    """Site d'où vient l'administrateur (en-tête Origin, sinon Referer) : sert de lien de repli dans l'e-mail de refus."""
+    origin = request.headers.get("origin")
+    if not origin or origin == "null":
+        referer = request.headers.get("referer") or ""
+        match = re.match(r"^(https?://[^/?#\s]+)", referer)
+        origin = match.group(1) if match else None
+    return origin
+
+
+def _send_notice(result: dict, wait: bool = True, origin: str | None = None) -> str:
     """Envoie l'e-mail de décision (après l'enregistrement) ; `result` reçoit `mail` (+ `mail_erreur` en cas d'échec)."""
-    state, error = mailer.notify(result.pop("notice", None), wait=wait)
+    notice = result.pop("notice", None)
+    if notice and origin:
+        notice["origin"] = origin
+    state, error = mailer.notify(notice, wait=wait)
     result["mail"] = state
     if error:
         result["mail_erreur"] = error
@@ -409,7 +422,7 @@ def _decide_modification(db: Database, request_id: int, action: str, comment: st
     },
     openapi_extra=d.request_body(d.ProcessModificationBody, "Demande et décision."),
 )
-def process_modification(body: Any = Depends(json_body), db: Database = Depends(get_db)):
+def process_modification(request: Request, body: Any = Depends(json_body), db: Database = Depends(get_db)):
     data = json_object(body) or {}
     request_id = positive_int(data.get("id"))
     action = data.get("action", "")
@@ -421,7 +434,7 @@ def process_modification(body: Any = Depends(json_body), db: Database = Depends(
     )
     comment = _refusal_comment(data) if action == "reject" else None
     result = _decide_modification(db, request_id, action, comment)
-    _send_notice(result)
+    _send_notice(result, origin=_request_origin(request))
     audit.annotate(
         matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"),
         commentaire_longueur=len(comment) if comment else None,
@@ -844,7 +857,7 @@ def _decide_creation(db: Database, request_id: int, action: str, comment: str | 
     },
     openapi_extra=d.request_body(d.ProcessModificationBody, "Demande et décision."),
 )
-def process_creation(body: Any = Depends(json_body), db: Database = Depends(get_db)):
+def process_creation(request: Request, body: Any = Depends(json_body), db: Database = Depends(get_db)):
     data = json_object(body) or {}
     request_id = positive_int(data.get("id"))
     action = data.get("action", "")
@@ -856,7 +869,7 @@ def process_creation(body: Any = Depends(json_body), db: Database = Depends(get_
     )
     comment = _refusal_comment(data) if action == "reject" else None
     result = _decide_creation(db, request_id, action, comment)
-    _send_notice(result)
+    _send_notice(result, origin=_request_origin(request))
     audit.annotate(
         matricule=result.get("matricule"), mail=result["mail"], mail_erreur=result.get("mail_erreur"),
         fusion=result.get("fusion"), commentaire_longueur=len(comment) if comment else None,

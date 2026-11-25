@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 
-from . import audit, config, db
+from . import audit, config, db, mailer
 from .netinfo import client_ip
 from .docs_access import register_docs_routes
 from .errors import UpbJSONResponse, register_error_handlers
@@ -56,6 +56,7 @@ TAGS = [
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    mailer.warn_if_incomplete()
     try:
         db.open_pool()
         threading.Thread(target=db.log_schema_status, daemon=True).start()  # n'attend pas la base

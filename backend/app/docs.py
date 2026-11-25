@@ -563,6 +563,11 @@ class StudentCreatedResponse(SuccessResponse):
     data: AdminStudent
 
 
+class RequestReceivedResponse(SuccessResponse):
+    notifie_par_email: bool = Field(description="Vrai si une adresse e-mail est connue : l'étudiant sera prévenu de la décision.")
+    delai_heures: int = Field(description="Délai annoncé à l'étudiant pour la décision.", examples=[12])
+
+
 class ReferentielsResponse(BaseModel):
     status: Literal["success"] = "success"
     filieres: list[str] = Field(examples=[["ASSRI", "RIT", "MIAGE", "SEG", "SEA", "SJAP", "3EA"]])

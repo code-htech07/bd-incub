@@ -76,6 +76,7 @@
                         <div class="contact-field">
                             <label for="email">Adresse e-mail</label>
                             <input type="email" id="email" placeholder="prenom.nom@exemple.ci" autocomplete="email">
+                            <small class="field-hint">Renseignez-la pour être informé(e) par e-mail de la décision.</small>
                         </div>
                         <div>
                             <label for="telephone">Téléphone</label>
@@ -325,9 +326,11 @@
                 result.innerHTML = `<div class="panel ${response.ok ? 'ok' : 'err'}">${esc(data.message || 'Réponse du serveur invalide.')}</div>`;
                 if (response.ok) {
                     btn.disabled = true;
-                    say(modeCreation
-                        ? "Votre dossier est envoyé. Une fois validé par un administrateur, revenez vérifier votre matricule."
-                        : "Votre demande est envoyée. Un administrateur doit la valider avant toute mise à jour.");
+                    say(data.notifie_par_email
+                        ? `Votre demande est envoyée. Vous serez informé(e) par e-mail de la décision dans un délai de ${Number(data.delai_heures) || 12} heures.`
+                        : (modeCreation
+                            ? "Votre dossier est envoyé. Sans adresse e-mail, revenez vérifier votre matricule une fois la demande validée."
+                            : "Votre demande est envoyée. Sans adresse e-mail, revenez vérifier votre matricule pour connaître la décision."));
                 } else {
                     mood('sad'); say(data.message || "La demande n'a pas pu être envoyée.");
                 }

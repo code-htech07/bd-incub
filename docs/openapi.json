@@ -351,7 +351,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/RequestReceivedResponse"
                 }
               }
             }
@@ -564,7 +564,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/RequestReceivedResponse"
                 }
               }
             }
@@ -5726,6 +5726,40 @@
           "niveaux"
         ],
         "title": "ReferentielsResponse"
+      },
+      "RequestReceivedResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "success",
+            "title": "Status",
+            "default": "success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "notifie_par_email": {
+            "type": "boolean",
+            "title": "Notifie Par Email",
+            "description": "Vrai si une adresse e-mail est connue : l'étudiant sera prévenu de la décision."
+          },
+          "delai_heures": {
+            "type": "integer",
+            "title": "Delai Heures",
+            "description": "Délai annoncé à l'étudiant pour la décision.",
+            "examples": [
+              12
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "notifie_par_email",
+          "delai_heures"
+        ],
+        "title": "RequestReceivedResponse"
       },
       "StudentCreatedResponse": {
         "properties": {

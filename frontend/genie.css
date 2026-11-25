@@ -118,6 +118,7 @@ transform:perspective(1100px) rotateX(var(--tx)) rotateY(var(--ty));transition:t
 .bar i{position:absolute;inset:0;background:var(--ok);transform:scaleX(0);transform-origin:left;transition:transform .7s cubic-bezier(.2,.8,.2,1)}
 .bar.fill i{transform:scaleX(1)}
 label{display:block;font-weight:700;font-size:.88rem;margin-bottom:8px}
+.field-hint{display:block;margin-top:6px;font-size:.78rem;font-weight:500;color:var(--mut)}
 input[type=text],input[type=email]{width:100%;padding:16px 18px;border:2px solid #cfdcf3;border-radius:14px;font:700 1.05rem var(--font);letter-spacing:.06em;background:#fff;color:var(--tx);transition:border-color .2s,box-shadow .2s}
 input[type=text]{text-transform:uppercase}
 input[type=email]{letter-spacing:0;text-transform:none;font-weight:500}

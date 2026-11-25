@@ -65,10 +65,41 @@ def _site_origin() -> str:
     return next((o.strip().rstrip("/") for o in os.getenv("UPB_CORS_ORIGINS", "").split(",") if o.strip()), "")
 
 
-def portal_url() -> str | None:
-    """Page où l'étudiant met à jour ses informations : `UPB_PORTAL_URL`, sinon la racine du premier site autorisé."""
-    url = os.getenv("UPB_PORTAL_URL", "").strip() or _site_origin()
-    return url if url.startswith("https://") else None
+def _usable(url: str) -> bool:
+    """https obligatoire ; http toléré uniquement vers la machine locale (essais en développement)."""
+    return url.startswith("https://") or bool(re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?(/|$)", url))
+
+
+def _allowed_origins() -> list[str]:
+    return [o.strip().rstrip("/") for o in os.getenv("UPB_CORS_ORIGINS", "").split(",") if o.strip()]
+
+
+def portal_url(origin: str | None = None) -> str | None:
+    """Page où l'étudiant met à jour ses informations.
+
+    Ordre : `UPB_PORTAL_URL` ; sinon `origin`, le site d'où l'administrateur a pris sa décision (les pages d'administration et
+    du portail sont servies par le même site) s'il est utilisable et, quand `UPB_CORS_ORIGINS` est défini, autorisé ;
+    sinon la racine du premier site de `UPB_CORS_ORIGINS`."""
+    url = os.getenv("UPB_PORTAL_URL", "").strip()
+    if not url and origin:
+        origin = origin.strip().rstrip("/")
+        allowed = _allowed_origins()
+        if _usable(origin) and (not allowed or origin in allowed):
+            url = origin
+    url = url or _site_origin()
+    return url if _usable(url) else None
+
+
+def warn_if_incomplete() -> None:
+    """Au démarrage : signale ce qui manquera dans les e-mails (bouton du refus, logo) plutôt que de l'omettre en silence."""
+    if not enabled():
+        return
+    if not portal_url():
+        logger.warning("E-MAIL : le bouton « Mettre à jour mes informations » des e-mails de refus est ABSENT : "
+                       "définir UPB_PORTAL_URL (adresse https du portail étudiant) ; à défaut, le lien est déduit du site "
+                       "d'où l'administrateur refuse la demande.")
+    if not logo_url():
+        logger.warning("E-MAIL : pas de logo dans l'en-tête : définir UPB_MAIL_LOGO_URL (https) ou UPB_CORS_ORIGINS.")
 
 
 def logo_url() -> str | None:
@@ -79,7 +110,7 @@ def logo_url() -> str | None:
     if not url:
         origin = _site_origin()
         url = f"{origin}/logo-upb.png" if origin else ""
-    return url if url.startswith("https://") else None
+    return url if _usable(url) else None
 
 
 NAVY, GOLD, ROYAL, PAPER = "#1b2275", "#f9b91f", "#1f55d8", "#f6f9ff"
@@ -96,7 +127,8 @@ HEADLINES = {
 
 
 def compose(
-    kind: str, approved: bool, nom: str, prenoms: str, matricule: str | None, comment: str | None = None
+    kind: str, approved: bool, nom: str, prenoms: str, matricule: str | None, comment: str | None = None,
+    origin: str | None = None,
 ) -> tuple[str, str, str]:
     subject = SUBJECTS[(kind, approved)]
     headline = HEADLINES[(kind, approved)]
@@ -104,7 +136,7 @@ def compose(
     greeting = f"Bonjour {name}," if name else "Bonjour,"
     body = BODIES[(kind, approved)]
     comment = (comment or "").strip() if not approved else ""
-    link = portal_url() if not approved else None
+    link = portal_url(origin) if not approved else None
     text = "\n".join(
         [greeting, "", body]
         + ([f"Motif du refus : {comment}"] if comment else [])
@@ -230,7 +262,7 @@ def notify(notice: dict | None, wait: bool = False) -> tuple[str, str | None]:
         return "non_configure", None
     subject, text, body_html = compose(
         notice["kind"], notice["approved"], notice.get("nom", ""), notice.get("prenoms", ""), notice.get("matricule"),
-        notice.get("comment"),
+        notice.get("comment"), notice.get("origin"),
     )
     if wait:
         ok, reason = deliver(to, subject, text, body_html)

@@ -21,7 +21,14 @@ def database_url() -> str:
 
 
 def connect_timeout() -> int:
+    """Durée maximale d'UNE tentative de connexion à la base (secondes)."""
     return int(os.getenv("UPB_DB_CONNECT_TIMEOUT", "10"))
+
+
+def pool_timeout() -> int:
+    """Durée maximale d'attente d'une connexion par une requête (secondes) : couvre le réveil de Neon (scale-to-zero)
+    et les reconnexions, plus longue qu'une simple tentative de connexion."""
+    return int(os.getenv("UPB_DB_POOL_TIMEOUT", "30"))
 
 
 def default_per_page() -> int:

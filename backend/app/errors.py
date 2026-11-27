@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import audit
-from .db import schema_hint
+from .db import DatabaseUnavailable, schema_hint
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,17 @@ class ApiError(Exception):
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(DatabaseUnavailable)
+    async def database_unavailable(_request: Request, _error: DatabaseUnavailable):
+        message = (
+            "La base de données met trop de temps à répondre (démarrage ou incident). "
+            "Patientez quelques secondes puis réessayez."
+        )
+        audit.annotate(message="Base de données indisponible (délai d'attente dépassé).")
+        response = respond(503, {"status": "error", "message": message})
+        response.headers["Retry-After"] = "5"
+        return response
+
     @app.exception_handler(ApiError)
     async def api_error(_request: Request, error: ApiError):
         extra_errors = error.extra.get("errors")

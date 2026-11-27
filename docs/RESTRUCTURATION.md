@@ -638,3 +638,18 @@ Correction de l'étape 15 : le matricule n'est pas auto-formé, il est saisi (é
   homonyme ou la même personne avec un matricule mal saisi », « ne sera pas complété automatiquement… »). Les corrections qui
   touchent au nom affichent aussi le niveau `partiel`.
 - Tests : `tests/test_mail_and_names.py`. Aucun changement de schéma.
+
+## Étape 27 — Base injoignable : attente plus longue et erreur claire
+
+- **Constat (production)** : toutes les routes d'administration répondaient `500` avec « couldn't get a connection after 10.00 sec » :
+  le pool de connexions n'obtenait aucune connexion à Neon en 10 s (réveil de la base après inactivité, incident ou quota). Quelques
+  minutes plus tard `/api/sante?base=1` répondait `ok` : panne passagère. Cause exacte côté Neon non établie depuis le code.
+- **Attente par requête** : nouvelle variable `UPB_DB_POOL_TIMEOUT` (30 s par défaut), distincte de `UPB_DB_CONNECT_TIMEOUT`
+  (10 s par tentative de connexion), pour couvrir un réveil lent de Neon.
+- **Erreur claire** : si aucune connexion n'est obtenue, l'API répond `503` avec `Retry-After: 5` et « La base de données met trop de
+  temps à répondre (démarrage ou incident). Patientez quelques secondes puis réessayez. » au lieu d'un `500` brut ; la page
+  l'affiche telle quelle. Le détail est dans les logs (« Aucune connexion à la base après … s »). La liste des étudiants ne renvoie
+  plus le texte brut d'une erreur de base.
+- **Préchauffage** : au démarrage, le serveur demande une première connexion en arrière-plan pour réveiller la base avant les premières
+  requêtes (sans retarder le démarrage).
+- Guide de déploiement : ligne de dépannage et vérifications (`/api/sante?base=1`, console Neon, logs Render). Test : `tests/test_api_basic.py`.

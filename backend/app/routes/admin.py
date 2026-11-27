@@ -145,7 +145,7 @@ def get_students(
             students = cursor.fetchall()
     except psycopg.Error as error:
         logger.exception("Lecture des étudiants UPB")
-        raise ApiError(500, str(error).strip() or "Erreur de base de données.")
+        raise _db_failure(error, "Impossible de charger les étudiants.")
 
     for student in students:
         for field, value in student.items():

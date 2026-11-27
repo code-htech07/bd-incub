@@ -59,7 +59,7 @@ async def lifespan(_app: FastAPI):
     mailer.warn_if_incomplete()
     try:
         db.open_pool()
-        threading.Thread(target=db.log_schema_status, daemon=True).start()  # n'attend pas la base
+        threading.Thread(target=lambda: (db.warm_pool(), db.log_schema_status()), daemon=True).start()  # n'attend pas la base
     except RuntimeError:
         logger.exception("Pool de connexions non ouvert (DATABASE_URL manquant ?)")
     yield

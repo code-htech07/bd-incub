@@ -4,13 +4,17 @@ from collections.abc import Iterator
 
 import psycopg
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from . import config
 
 logger = logging.getLogger(__name__)
 
 _pool: ConnectionPool | None = None
+
+
+class DatabaseUnavailable(Exception):
+    """Aucune connexion à la base n'a pu être obtenue à temps (réveil de Neon, incident, saturation)."""
 
 
 def open_pool() -> None:
@@ -55,6 +59,15 @@ def audit_connection():
     return _audit_pool.connection(timeout=config.connect_timeout())
 
 
+def warm_pool() -> None:
+    """Au démarrage : demande une première connexion pour réveiller la base avant les premières requêtes (sans bloquer)."""
+    try:
+        if _pool is not None:
+            _pool.wait(timeout=config.pool_timeout())
+    except Exception:  # noqa: BLE001
+        logger.warning("Pool de connexions non prêt au démarrage (base en cours de réveil ?)")
+
+
 def close_pool() -> None:
     global _pool, _audit_pool
     if _pool is not None:
@@ -78,8 +91,14 @@ class Database:
             if _pool is None:
                 open_pool()
             assert _pool is not None
-            self._manager = _pool.connection(timeout=config.connect_timeout())
-            self._connection = self._manager.__enter__()
+            try:
+                self._manager = _pool.connection(timeout=config.pool_timeout())
+                self._connection = self._manager.__enter__()
+            except PoolTimeout as error:
+                self._manager = None
+                self._connection = None
+                logger.error("Aucune connexion à la base après %s s : %s", config.pool_timeout(), error)
+                raise DatabaseUnavailable(str(error)) from error
         return self._connection
 
     def cursor(self, *args, **kwargs):

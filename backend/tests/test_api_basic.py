@@ -420,3 +420,29 @@ def test_health_with_database_check_on_the_real_schema(client):
     response = client.get("/api/sante", params={"base": 1})
     assert response.status_code == 200, response.text  # base de développement à jour (migrations 01 à 09)
     assert response.json() == {"status": "ok"}
+
+
+def test_unreachable_database_gives_a_clear_retryable_503(monkeypatch):
+    """Aucune connexion obtenue à temps : 503 + Retry-After et un message clair (pas un 500 brut, pas de détail technique)."""
+    from psycopg_pool import PoolTimeout
+    from app import config, db
+
+    class FakePool:
+        def connection(self, timeout=None):
+            self.timeout = timeout
+            raise PoolTimeout("couldn't get a connection after 30.00 sec")
+
+    pool = FakePool()
+    monkeypatch.delenv("UPB_DB_POOL_TIMEOUT", raising=False)
+    monkeypatch.setattr(db, "_pool", pool)
+    assert config.pool_timeout() == 30
+    anonymous = TestClient(create_app())  # sans démarrage : le faux pool reste en place
+    response = anonymous.post("/api/verifier", json={"matricule": "KOUA1703980001"})
+    assert response.status_code == 503 and response.headers["retry-after"] == "5"
+    body = response.json()
+    assert body["status"] == "error" and "met trop de temps à répondre" in body["message"]
+    assert "connection" not in body["message"].lower() and pool.timeout == 30
+    # Délai réglable
+    monkeypatch.setenv("UPB_DB_POOL_TIMEOUT", "45")
+    anonymous.post("/api/verifier", json={"matricule": "KOUA1703980001"})
+    assert pool.timeout == 45

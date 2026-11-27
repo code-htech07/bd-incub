@@ -360,7 +360,10 @@
                 mood('sad');
             } finally {
                 busy(false);
-                if (!btn.disabled) charge(btn, false);
+                // En cas d'échec (ou d'erreur inattendue), on arrête toujours l'animation et on réactive le bouton ;
+                // seul l'état « envoyé » reste figé.
+                if (!btn.classList.contains('sent')) charge(btn, false);
+                else btn.classList.remove('loading');
             }
         }
 
